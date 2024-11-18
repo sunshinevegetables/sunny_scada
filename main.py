@@ -12,6 +12,7 @@ import os
 import time
 import yaml
 from playsound import playsound 
+import pygame
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -351,10 +352,11 @@ def monitor_suction_pressure():
                     continue
 
                 # Check if suction pressure exceeds the threshold
-                if suction_pressure > 45:
+                if suction_pressure > 36:
                     logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
                     # Play alarm sound
-                    playsound('assets/alarm.mp3')
+                    #playsound('static/alarm.wav')
+                    play_alarm()
                 else:
                     logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
 
@@ -365,3 +367,9 @@ def monitor_suction_pressure():
             logger.error(f"Error during suction pressure monitoring: {e}")
 
     
+def play_alarm():
+    pygame.mixer.init()
+    pygame.mixer.music.load("static/alarm.wav")
+    pygame.mixer.music.play()
+    while pygame.mixer.music.get_busy():  # Wait for the music to finish
+        continue
