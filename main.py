@@ -34,7 +34,8 @@ stop_events = {
     "hmi": threading.Event(),
     "plc": threading.Event(),
     "alarms": threading.Event(),
-    "monitor_suction_pressure": threading.Event()}
+    "monitor_screw_comp_suction_pressure": threading.Event(),
+    "monitor_viltor_suction_pressure": threading.Event()}
 
 # Define the model for the request body
 class WriteSignalRequest(BaseModel):
@@ -127,10 +128,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     threads = []
     # Enable specific threads
-    threads.append(threading.Thread(target=update_screw_data, daemon=True))
+    # threads.append(threading.Thread(target=update_screw_data, daemon=True))
     #threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
-    threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
-    # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
+    threads.append(threading.Thread(target=monitor_viltor_comp_suction_pressure, daemon=True))
+    threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
     # main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
