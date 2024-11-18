@@ -421,7 +421,7 @@ def monitor_viltor_comp_suction_pressure():
 
 def play_alarm():
     pygame.mixer.init()
-    pygame.mixer.music.load("static/alarm.wav")
+    pygame.mixer.music.load("static/high_suction_pressure_alarm.wav")
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():  # Wait for the music to finish
         continue
