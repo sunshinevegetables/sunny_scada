@@ -1,0 +1,19 @@
+vfds:
+  - name: "VFD SCREW COMP-A"
+    ip: "192.168.1.21"
+    port: 502
+  - name: "VFD SCREW COMP-B"
+    ip: "192.168.1.22"
+    port: 502
+  - name: "VFD SCREW COMP-C"
+    ip: "192.168.1.23"
+    port: 502
+  - name: "VFD SCREW COMP-D"
+    ip: "192.168.1.24"
+    port: 502
+  - name: "VFD COLD STORAGE -1"
+    ip: "192.168.1.25"
+    port: 502
+  - name: "VFD COLD STORAGE-2"
+    ip: "192.168.1.26"
+    port: 502

@@ -1,0 +1,14 @@
+screw_comp:
+  - name: "Micrologix1400 Screw Comp-A"
+    ip: "192.168.1.5"
+    port: 502
+  - name: "Micrologix1400 Screw Comp-B"
+    ip: "192.168.1.7"
+    port: 502
+  - name: "Micrologix1400 Screw Comp-C"
+    ip: "192.168.1.9"
+    port: 502
+  - name: "Micrologix1400 Screw Comp-D"
+    ip: "192.168.1.11"
+    port: 502
+

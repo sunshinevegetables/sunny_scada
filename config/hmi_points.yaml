@@ -1,0 +1,4 @@
+data_points:
+  "SCREEN STATUS": 40020
+  "INPUT STATE": 40021
+  "OUTPUT STATE": 40022

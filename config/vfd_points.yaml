@@ -1,0 +1,5 @@
+data_points:
+  "CURRENT SPEED": 40010
+  "TARGET SPEED": 40011
+  "TORQUE": 40012
+  "STATUS": 40013
