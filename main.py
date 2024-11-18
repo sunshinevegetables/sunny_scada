@@ -11,6 +11,7 @@ import logging
 import os
 import time
 import yaml
+from playsound import playsound 
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -19,13 +20,6 @@ logger = logging.getLogger(__name__)
 # Initialize shared components
 storage = DataStorage()
 plc_reader = PLCReader(storage=storage)
-
-# Load each type of configuration
-comp_config = load_config("screws")  # Load compressors configuration
-comp_config = load_config("screws")  # Load compressors configuration
-vfd_config = load_config("vfd")    # Load VFD configuration
-hmi_config = load_config("hmi")    # Load HMI configuration
-plc_config = load_config("plc")    # Load PLC configuration
 
 # Initialize shared PLC writer
 screw_comp_writer = PLCWriter(config_type="screw_comp")
@@ -38,8 +32,8 @@ stop_events = {
     "vfd": threading.Event(),
     "hmi": threading.Event(),
     "plc": threading.Event(),
-    "alarms": threading.Event()
-}
+    "alarms": threading.Event(),
+    "monitor_suction_pressure": threading.Event()}
 
 # Define the model for the request body
 class WriteSignalRequest(BaseModel):
@@ -52,12 +46,17 @@ class WriteSignalRequest(BaseModel):
 class StartPackhouseRequest(BaseModel):
     plc_name: str
 
+
 # Background thread for reading compressor data
 def update_screw_data():
     while not stop_events["screw"].is_set():
         try:
             logger.info("Reading screw compressor data...")
-            plc_reader.read_plcs_from_config("config/screw_comp_config.yaml", "config/screw_comp_points.yaml", None)
+            plc_reader.read_plcs_from_config(
+                config_file="config/screw_comp_config.yaml",
+                plc_points_file="config/screw_comp_points.yaml",
+                floating_points_file=None
+            )
             time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
         except Exception as e:
             logger.error(f"Error in compressor thread: {e}")
@@ -120,20 +119,22 @@ def update_plc_data():
         except Exception as e:
             logger.error(f"Unexpected error in PLC thread: {e}")
 
-
+    
 # Custom lifespan manager using asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     threads = []
-
     # Enable specific threads
-    # threads.append(threading.Thread(target=update_screw_data, daemon=True))
+    threads.append(threading.Thread(target=update_screw_data, daemon=True))
+    threads.append(threading.Thread(target=monitor_suction_pressure, daemon=True))
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
-    threads.append(threading.Thread(target=update_plc_data, daemon=True))
-
+    # main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
+    # threads.append(main_plc_thread)
+    
+   
     # Start all enabled threads
     for thread in threads:
         thread.start()
@@ -246,39 +247,6 @@ def start_packhouse(request: StartPackhouseRequest):
     except Exception as e:
         logger.error(f"Error in start_packhouse: {e}")
         raise HTTPException(status_code=500, detail="An error occurred while starting the packhouse.")
-
-
-def monitor_suction_pressure(plc_name, address, retries=10, interval=5):
-    """
-    Monitor suction pressure for stability.
-
-    :param plc_name: Name of the PLC to monitor.
-    :param address: Modbus address for suction pressure.
-    :param retries: Maximum number of retries.
-    :param interval: Time interval between retries in seconds.
-    :return: True if suction pressure stabilizes, False otherwise.
-    """
-    try:
-        for attempt in range(retries):
-            data = plc_reader.read_plcs_from_config(
-                config_file="config/screw_comp_config.yaml",
-                points_file="config/screw_comp_points.yaml"
-            )
-            print(f"Data: {data}")
-            suction_pressure = data.get(plc_name, {}).get("SUCTION PRESSURE")
-
-            if suction_pressure is not None and suction_pressure > 0:
-                logger.info(f"Suction pressure stabilized: {suction_pressure}")
-                return True
-            else:
-                logger.info(f"Attempt {attempt + 1}/{retries}: Suction pressure not stable. Retrying in {interval}s...")
-                time.sleep(interval)
-
-        logger.error("Suction pressure did not stabilize within the allowed retries.")
-        return False
-    except Exception as e:
-        logger.error(f"Error monitoring suction pressure: {e}")
-        return False
     
 @app.post("/start_iqf", summary="Start IQF Process", description="Initiate the IQF start-up process.")
 def start_iqf():
@@ -340,3 +308,60 @@ def start_iqf():
     except Exception as e:
         logger.error(f"Error in start_iqf: {e}")
         raise HTTPException(status_code=500, detail="An error occurred while starting the IQF process.")
+
+def monitor_suction_pressure():
+    """
+    Monitors the suction pressure for all screw compressors defined in the configuration.
+
+    - Loads the screw_comp_config file.
+    - Fetches data from the shared storage.
+    - Loops through each screw compressor in the configuration.
+    - Logs a warning if the suction pressure exceeds 45.
+    """
+    while not stop_events["monitor_suction_pressure"].is_set():
+        try:
+            logger.info("Starting suction pressure monitoring...")
+
+            # Load the screw compressor configuration
+            config_file = "config/screw_comp_config.yaml"
+            screw_comps = plc_reader.load_config(config_file)
+
+            if not screw_comps:
+                logger.error(f"No screw compressors found in configuration file: {config_file}")
+                return
+
+            for screw_comp in screw_comps:
+                plc_name = screw_comp.get("name")
+                if not plc_name:
+                    logger.warning("Skipping a screw compressor with no name in the configuration.")
+                    continue
+
+                # Fetch data from storage
+                data = storage.get_data().get(plc_name, {})
+                logger.info(f"Data: {data}")
+                if not data:
+                    logger.warning(f"No data available for {plc_name}. Skipping...")
+                    continue
+
+                # Access nested data for SUCTION PRESSURE
+                nested_data = data.get("data", {})
+                suction_pressure = nested_data.get("SUCTION PRESSURE")/100
+                if suction_pressure is None:
+                    logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
+                    continue
+
+                # Check if suction pressure exceeds the threshold
+                if suction_pressure > 45:
+                    logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
+                    # Play alarm sound
+                    playsound('assets/alarm.mp3')
+                else:
+                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
+
+            # Wait for the next polling interval
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 20)))
+
+        except Exception as e:
+            logger.error(f"Error during suction pressure monitoring: {e}")
+
+    

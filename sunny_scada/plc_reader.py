@@ -173,24 +173,30 @@ class PLCReader:
         :param floating_points_file: Path to the floating-point data points file
         :return: Dictionary containing combined data read from PLCs, keyed by PLC name
         """
+        logger.info(f"Config File: {config_file}")
+        logger.info(f"Points File: {plc_points_file}")
         try:
             # Load PLC configuration
             plc_config = self.load_config(config_file)
+            logger.debug(f"Configurations: {plc_config}")
             if not plc_config:
                 logger.error(f"PLC configuration file is empty or invalid: {config_file}")
                 return None
 
             # Load integer-based data points
             data_points = self.load_data_points(plc_points_file)
+            logger.debug(f"Data Points: {data_points}")
             if not data_points:
                 logger.error(f"Data points file is empty or invalid: {plc_points_file}")
                 return None
-
+            floating_points={}
             # Load floating-point data points
-            floating_points = self.load_data_points(floating_points_file)
-            if not floating_points:
-                logger.warning(f"Floating points file is empty or invalid: {floating_points_file}")
-                floating_points = {}  # Fallback to an empty dictionary
+            if floating_points_file:
+                floating_points = self.load_data_points(floating_points_file)
+                if not floating_points:
+                    logger.warning(f"Floating points file is empty or invalid: {floating_points_file}")
+                    floating_points = {}  # Fallback to an empty dictionary
+
 
             # Initialize Modbus clients
             clients = self.initialize_clients(plc_config)
@@ -231,7 +237,6 @@ class PLCReader:
         except Exception as e:
             logger.error(f"Unexpected error while processing configuration file {config_file}: {e}")
             return None
-
 
 
 
