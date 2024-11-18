@@ -34,7 +34,7 @@ stop_events = {
     "hmi": threading.Event(),
     "plc": threading.Event(),
     "alarms": threading.Event(),
-    "monitor_screw_comp_suction_pressure": threading.Event(),
+    "monitor_screw_suction_pressure": threading.Event(),
     "monitor_viltor_suction_pressure": threading.Event()}
 
 # Define the model for the request body
@@ -314,7 +314,7 @@ def monitor_screw_comp_suction_pressure():
     - Loops through each screw compressor in the configuration.
     - Logs a warning if the suction pressure exceeds 45.
     """
-    while not stop_events["monitor_suction_pressure"].is_set():
+    while not stop_events["monitor_screw_suction_pressure"].is_set():
         try:
             logger.info("Starting suction pressure monitoring...")
 
@@ -397,22 +397,23 @@ def monitor_viltor_comp_suction_pressure():
 
                 # Access nested data for SUCTION PRESSURE
                 nested_data = data.get("data", {})
-                suction_pressure = nested_data.get("SUCTION PRESSURE") / 100
+                suction_pressure = nested_data.get("SUC MOD")
                 if suction_pressure is None:
                     logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
                     continue
-
-                # Check if suction pressure exceeds the threshold
-                if suction_pressure > 36:
-                    logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
-                    # Play alarm sound
-                    #playsound('static/alarm.wav')
-                    play_alarm()
                 else:
-                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
+                    suction_pressure = suction_pressure/100
+                    # Check if suction pressure exceeds the threshold
+                    if suction_pressure > 48:
+                        logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
+                        # Play alarm sound
+                        #playsound('static/alarm.wav')
+                        play_alarm()
+                    else:
+                        logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
 
             # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 20)))
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 60)))
 
         except Exception as e:
             logger.error(f"Error during Viltor compressor suction pressure monitoring: {e}")
