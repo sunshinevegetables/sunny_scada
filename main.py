@@ -128,7 +128,8 @@ async def lifespan(app: FastAPI):
     threads = []
     # Enable specific threads
     threads.append(threading.Thread(target=update_screw_data, daemon=True))
-    threads.append(threading.Thread(target=monitor_suction_pressure, daemon=True))
+    #threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
+    threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
@@ -234,14 +235,7 @@ def start_packhouse(request: StartPackhouseRequest):
 
         # Step 3: Monitor suction pressure
         logger.info("Monitoring suction pressure...")
-        suction_pressure_address = 40001  # Define the address if needed
-        if not monitor_suction_pressure(
-            plc_name=plc_name,
-            address=suction_pressure_address,
-            retries=10,
-            interval=5
-        ):
-            raise HTTPException(status_code=500, detail="Suction pressure did not stabilize in time.")
+        
 
         return {"message": f"Packhouse started successfully on '{plc_name}'. Suction pressure is stable."}
 
@@ -310,7 +304,7 @@ def start_iqf():
         logger.error(f"Error in start_iqf: {e}")
         raise HTTPException(status_code=500, detail="An error occurred while starting the IQF process.")
 
-def monitor_suction_pressure():
+def monitor_screw_comp_suction_pressure():
     """
     Monitors the suction pressure for all screw compressors defined in the configuration.
 
@@ -366,7 +360,63 @@ def monitor_suction_pressure():
         except Exception as e:
             logger.error(f"Error during suction pressure monitoring: {e}")
 
-    
+def monitor_viltor_comp_suction_pressure():
+    """
+    Monitors the suction pressure for all Viltor compressors defined in the configuration.
+
+    - Loads the viltor_comp_config file.
+    - Fetches data from the shared storage.
+    - Loops through each Viltor compressor in the configuration.
+    - Logs a warning if the suction pressure exceeds 45.
+    """
+    while not stop_events["monitor_viltor_suction_pressure"].is_set():
+        try:
+            logger.info("Starting Viltor compressor suction pressure monitoring...")
+
+            # Load the Viltor compressor configuration
+            config_file = "config/viltor_comp_config.yaml"
+            viltor_comps = plc_reader.load_config(config_file)
+
+            if not viltor_comps:
+                logger.error(f"No Viltor compressors found in configuration file: {config_file}")
+                return
+
+            for viltor_comp in viltor_comps:
+                plc_name = viltor_comp.get("name")
+                if not plc_name:
+                    logger.warning("Skipping a Viltor compressor with no name in the configuration.")
+                    continue
+
+                # Fetch data from storage
+                data = storage.get_data().get(plc_name, {})
+                logger.info(f"Data: {data}")
+                if not data:
+                    logger.warning(f"No data available for {plc_name}. Skipping...")
+                    continue
+
+                # Access nested data for SUCTION PRESSURE
+                nested_data = data.get("data", {})
+                suction_pressure = nested_data.get("SUCTION PRESSURE") / 100
+                if suction_pressure is None:
+                    logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
+                    continue
+
+                # Check if suction pressure exceeds the threshold
+                if suction_pressure > 36:
+                    logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
+                    # Play alarm sound
+                    #playsound('static/alarm.wav')
+                    play_alarm()
+                else:
+                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
+
+            # Wait for the next polling interval
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 20)))
+
+        except Exception as e:
+            logger.error(f"Error during Viltor compressor suction pressure monitoring: {e}")
+
+
 def play_alarm():
     pygame.mixer.init()
     pygame.mixer.music.load("static/alarm.wav")
