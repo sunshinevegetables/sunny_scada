@@ -51,7 +51,7 @@ class PLCWriter:
             logger.error(f"Error initializing PLCWriter: {e}")
             raise
 
-    def write_signal(self, plc_name, signal_name, value, write_points_path):
+    def write_signal(self, plc_name, signal_name, value):
         """
         Write a value to a specific signal on the PLC.
 
@@ -60,6 +60,11 @@ class PLCWriter:
         :param value: Value to write (e.g., 1 for ON, 0 for OFF).
         :return: True if successful, False otherwise.
         """
+        logger.info("##### Write Signal #####")
+        logger.info(f"PLC Name: {plc_name}")
+        logger.info(f"Signal Name: {signal_name}")
+        logger.info(f"Value: {value}")
+        logger.info("########################")
         if plc_name not in self.clients:
             logger.error(f"PLC '{plc_name}' not found in configuration.")
             return False

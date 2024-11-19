@@ -13,10 +13,14 @@ import time
 import yaml
 from playsound import playsound 
 import pygame
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+
 
 # Initialize shared components
 storage = DataStorage()
@@ -39,8 +43,8 @@ stop_events = {
 
 # Define the model for the request body
 class WriteSignalRequest(BaseModel):
-    plc_name: str
     plc_type: str  
+    plc_name: str
     signal_name: str
     value: int
 
@@ -130,8 +134,8 @@ async def lifespan(app: FastAPI):
     # Enable specific threads
     # threads.append(threading.Thread(target=update_screw_data, daemon=True))
     #threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
-    threads.append(threading.Thread(target=monitor_viltor_comp_suction_pressure, daemon=True))
-    threads.append(threading.Thread(target=update_viltor_data, daemon=True))
+    # threads.append(threading.Thread(target=monitor_viltor_comp_suction_pressure, daemon=True))
+    # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
     # main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
@@ -157,6 +161,17 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app with custom lifespan
 app = FastAPI(lifespan=lifespan)
 
+# Mount the static files
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust the origin list as needed
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/plc_data", summary="Get PLC Data", description="Fetch the latest data from all configured PLCs.")
 def get_plc_data():
     return storage.get_data()
@@ -166,6 +181,7 @@ def write_signal(request: WriteSignalRequest):
     """
     API endpoint to write a signal to a PLC.
     """
+    logger.info(f"Received write signal request: {request}")
     try:
         # Determine the write points YAML file based on plc_type
         if request.plc_type == "screw_comp":
