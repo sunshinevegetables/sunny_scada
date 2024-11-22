@@ -8,7 +8,7 @@ count = 999
 data_points = {f"MODBUS ADDRESS {start_address + i}": start_address + i for i in range(count)}
 
 # Save to YAML file with explicit quoting for keys
-output_file = "plc_points.yaml"
+output_file = "viltor_points.yaml"
 with open(output_file, "w") as file:
     yaml.dump(
         {"data_points": data_points}, 

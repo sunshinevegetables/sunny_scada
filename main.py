@@ -15,6 +15,8 @@ from playsound import playsound
 import pygame
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -29,6 +31,7 @@ plc_reader = PLCReader(storage=storage)
 # Initialize shared PLC writer
 screw_comp_writer = PLCWriter(config_type="screw_comp")
 viltor_comp_writer = PLCWriter(config_type="viltor_comp") 
+plc_writer = PLCWriter(config_type="plc")
 
 # Define stop events for threads
 stop_events = {
@@ -61,7 +64,8 @@ def update_screw_data():
             plc_reader.read_plcs_from_config(
                 config_file="config/screw_comp_config.yaml",
                 plc_points_file="config/screw_comp_points.yaml",
-                floating_points_file=None
+                floating_points_file=None,
+                digital_points_file=None
             )
             time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
         except Exception as e:
@@ -72,7 +76,7 @@ def update_viltor_data():
     while not stop_events["viltor"].is_set():
         try:
             logger.info("Reading viltor compressor data...")
-            plc_reader.read_plcs_from_config("config/viltor_comp_config.yaml", "config/viltor_comp_points.yaml", None)
+            plc_reader.read_plcs_from_config("config/viltor_comp_config.yaml", "config/viltor_comp_points.yaml", None, None)
             time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
         except Exception as e:
             logger.error(f"Error in compressor thread: {e}")
@@ -82,7 +86,7 @@ def update_vfd_data():
     while not stop_events["vfd"].is_set():
         try:
             logger.info("Reading VFD data...")
-            plc_reader.read_plcs_from_config("config/vfd_config.yaml", "config/vfd_points.yaml", None)
+            plc_reader.read_plcs_from_config("config/vfd_config.yaml", "config/vfd_points.yaml", None, None)
             time.sleep(int(os.getenv("POLLING_INTERVAL_VFD", 10)))
         except Exception as e:
             logger.error(f"Error in VFD thread: {e}")
@@ -92,7 +96,7 @@ def update_hmi_data():
     while not stop_events["hmi"].is_set():
         try:
             logger.info("Reading HMI data...")
-            plc_reader.read_plcs_from_config("config/hmi_config.yaml", "config/hmi_points.yaml", None)
+            plc_reader.read_plcs_from_config("config/hmi_config.yaml", "config/hmi_points.yaml", None, None)
             time.sleep(int(os.getenv("POLLING_INTERVAL_HMI", 10)))
         except Exception as e:
             logger.error(f"Error in HMI thread: {e}")
@@ -107,7 +111,8 @@ def update_plc_data():
             all_plc_data = plc_reader.read_plcs_from_config(
                 config_file="config/plc_config.yaml",
                 plc_points_file="config/plc_points.yaml",
-                floating_points_file="config/floating_points.yaml"
+                floating_points_file="config/floating_points.yaml",
+                digital_points_file="config/digital_points.yaml"
             )
 
             # Log and handle the aggregated data if necessary
@@ -133,13 +138,13 @@ async def lifespan(app: FastAPI):
     threads = []
     # Enable specific threads
     # threads.append(threading.Thread(target=update_screw_data, daemon=True))
-    #threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
+    # threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
     # threads.append(threading.Thread(target=monitor_viltor_comp_suction_pressure, daemon=True))
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
-    # main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
-    # threads.append(main_plc_thread)
+    main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
+    threads.append(main_plc_thread)
     
    
     # Start all enabled threads
@@ -162,7 +167,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Mount the static files
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+app.mount("/frontend", StaticFiles(directory="static", html=True), name="frontend")
+# Serve the config directory
+app.mount("/config", StaticFiles(directory="config"), name="config")
+
+@app.get("/")
+def serve_index():
+    return FileResponse("static/index.html")
 
 app.add_middleware(
     CORSMiddleware,
@@ -188,6 +200,8 @@ def write_signal(request: WriteSignalRequest):
             write_points_path = "config/screw_comp_write_points.yaml"
         elif request.plc_type == "viltor_comp":
             write_points_path = "config/viltor_comp_write_points.yaml"
+        elif request.plc_type =="plc":
+            write_points_path = "config/plc_write_points.yaml"
         else:
             raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
 
@@ -201,9 +215,13 @@ def write_signal(request: WriteSignalRequest):
 
         # Write the signal using the PLCWriter
         if request.plc_type == "screw_comp":
+            logger.info(f"Screw Request: {request}")
             success = screw_comp_writer.write_signal(request.plc_name, request.signal_name, request.value)
         elif request.plc_type == "viltor_comp":
-            success = viltor_comp_writer.write_signal(request.plc_name, request.signal_name, request.value)
+            logger.info(f"Viltor Request: {request}")
+            success = viltor_comp_writer.viltor_write_signal(request.plc_name, request.signal_name, request.value)
+        elif request.plc_type == "plc":
+            success = plc_writer.plc_write_signal(request.plc_name, request.signal_name, request.value)
         else:
             raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
         

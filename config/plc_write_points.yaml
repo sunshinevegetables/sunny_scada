@@ -1,0 +1,166 @@
+data_points:
+  COMP_1_WR_MODE:
+    register: 41337
+    bit: 0
+  COMP_2_WR_MODE:
+    register: 41341
+    bit: 0
+  COMP_3_WR_MODE:
+    register: 41345
+    bit: 0
+  COND1_MAINTENANCE_MODE:
+    register: 286
+    bit: 1
+  COND2_MASTER_FROM_SCADA:
+    register: 286
+    bit: 6
+  COND2_MAINTENANCE_MODE:
+    register: 286
+    bit: 7
+  COND3_MASTER_FROM_SCADA:
+    register: 286
+    bit: 10
+  COND3_MAINTENANCE_MODE:
+    register: 286
+    bit: 11
+  COND1_MASTER_FROM_SCADA:
+    register: 286
+    bit: 0
+  COND1_MASTER:
+    register: 286
+    bit: 5
+  COND2_MASTER:
+    register: 286
+    bit: 8
+  COND3_MASTER:
+    register: 286
+    bit: 12
+  COMP4_1_MASTER_FROM_SCADA:
+    register: 340
+    bit: 0
+  COMP4_2_MASTER_FROM_SCADA:
+    register: 340
+    bit: 1
+  COMP4_3_MASTER_FROM_SCADA:
+    register: 340
+    bit: 2
+  COMP4_4_MASTER_FROM_SCADA:
+    register: 340
+    bit: 3
+  COMP4_1_M:
+    register: 341
+    bit: 0
+  COMP4_2_M:
+    register: 341
+    bit: 1
+  COMP4_3_M:
+    register: 341
+    bit: 2
+  COMP4_4_M:
+    register: 341
+    bit: 3
+  COMP4_1_MAINTENANCE_MODE:
+    register: 320
+    bit: 1
+  COMP4_2_MAINTENANCE_MODE:
+    register: 320
+    bit: 2
+  COMP4_3_MAINTENANCE_MODE:
+    register: 320
+    bit: 3
+  COMP4_4_MAINTENANCE_MODE:
+    register: 320
+    bit: 4
+  LP_40_MASTER:
+    register: 361
+    bit: 0
+  LP_40_MASTER_FROM_SCADA:
+    register: 350
+    bit: 0
+  LP30_MASTER:
+    register: 350
+    bit: 3
+  LP30_MAINTENANCE_MODE:
+    register: 350
+    bit: 8
+  LP5_MASTER:
+    register: 350
+    bit: 15
+  LP5_MAINTENANCE_MODE:
+    register: 350
+    bit: 13
+  VILTER_1_START:
+    register: 41360
+    bit: 0
+  VILTER_1_STOP:
+    register: 41360
+    bit: 1
+  VILTER_1_SV_AUTO_MANUAL:
+    register: 41360
+    bit: 2
+  VILTER_1_SV1:
+    register: 41360
+    bit: 3
+  VILTER_1_SV2:
+    register: 41360
+    bit: 4
+  VILTER_1_SV3:
+    register: 41360
+    bit: 5
+  VILTER_1_SV4:
+    register: 41360
+    bit: 6
+  VILTER_2_START:
+    register: 41361
+    bit: 0
+  VILTER_2_SV_AUTO_MANUAL:
+    register: 41361
+    bit: 2
+  VILTER_2_SV1:
+    register: 41361
+    bit: 3
+  VILTER_2_SV2:
+    register: 41361
+    bit: 4
+  VILTER_2_SV3:
+    register: 41361
+    bit: 5
+  VILTER_3_START:
+    register: 41362
+    bit: 0
+  VILTER_3_SV_AUTO_MANUAL:
+    register: 41362
+    bit: 2
+  VILTER_3_SV1:
+    register: 41362
+    bit: 3
+  VILTER_3_SV2:
+    register: 41362
+    bit: 4
+  VILTER_3_SV3:
+    register: 41362
+    bit: 5
+  VILTER_3_SV4:
+    register: 41362
+    bit: 6
+  COMP_1_COMPRESSOR_FEED_BACK:
+    register: 41339
+    bit: 7
+  COMP_1_OIL_PUMP_FEED_BACK:
+    register: 41339
+    bit: 6
+  COMPRESSOR_1_5_AUTO:
+    register: 41357
+    bit: 0
+  COMPRESSOR_2_5_AUTO:
+    register: 41357
+    bit: 1
+  COMPRESSOR_3_30_AUTO:
+    register: 41357
+    bit: 2
+  COMPRESSOR_4_40_AUTO:
+    register: 41357
+    bit: 3
+  AUTO_STT_CMD:
+    register: 619
+    bit: 2

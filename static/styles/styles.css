@@ -27,7 +27,51 @@ header {
     border-radius: 10px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
+/* Additional styles for buttons */
+.start-button {
+    background-color: green;
+    color: white;
+    padding: 10px 20px;
+    margin: 5px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+}
 
+.stop-button {
+    background-color: red;
+    color: white;
+    padding: 10px 20px;
+    margin: 5px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.start-button:hover {
+    background-color: darkgreen;
+}
+
+.stop-button:hover {
+    background-color: darkred;
+}
+
+.compressor-section {
+    margin: 20px;
+}
+
+.message {
+    margin: 20px;
+    font-size: 18px;
+}
+
+.message.success {
+    color: green;
+}
+
+.message.error {
+    color: red;
+}
 /* Button Styles */
 button {
     display: inline-block;
@@ -102,4 +146,72 @@ footer {
     margin-top: 20px;
     padding: 10px;
     background-color: #f4f4f4;
+}
+
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+th {
+    background-color: #007BFF;
+    color: white;
+    text-align: left;
+    padding: 10px;
+}
+
+td {
+    padding: 10px;
+    border: 1px solid #ddd;
+}
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+tr:nth-child(odd) {
+    background-color: #ffffff;
+}
+tr:hover {
+    background-color: #f1f1f1;
+}
+
+
+/* Alarms */
+.table-container {
+    margin: 20px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+th {
+    background-color: #f4f4f4;
+}
+.toggle-status {
+    display: inline-block;
+    width: 50px;
+    text-align: center;
+    background-color: #ddd;
+    padding: 4px;
+    border-radius: 4px;
+}
+.on {
+    background-color: #28a745;
+    color: white;
+}
+.off {
+    background-color: #dc3545;
+    color: white;
 }

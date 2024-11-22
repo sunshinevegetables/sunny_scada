@@ -1,11 +1,22 @@
 data_points:
-  "COMPRESSOR START": 40200
-  "COMPRESSOR STOP": 40201
-  "LOAD MODE ENABLE": 40202
-  "UNLOAD MODE ENABLE": 40203
-  "RESET FAULT": 40204
-  "REMOTE MODE ENABLE": 40205
-  "LOCAL MODE ENABLE": 40206
-  "AUTO MODE ENABLE": 40207
-  "MANUAL MODE ENABLE": 40208
-  "SHUTDOWN MODE ENABLE": 40209
+  MOD_START:
+    register: 40007
+    bit: 0
+  MOD_STOP:
+    register: 40007
+    bit: 1
+  MOD_SV_MAN_AUTO:
+    register: 40007
+    bit: 2
+  MOD_SV1:
+    register: 40007
+    bit: 3
+  MOD_SV2:
+    register: 40007
+    bit: 4
+  MOD_SV3:
+    register: 40007
+    bit: 5
+  MOD_SV4:
+    register: 40007
+    bit: 6

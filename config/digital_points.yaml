@@ -1,0 +1,80 @@
+data_points:
+  COMP_1_STATUS_1:
+    address: 41338
+    alarms:
+      - { bit: 0, description: "Low Suction Pressure Alarm" }
+      - { bit: 1, description: "Low Suction Pressure Cutout" }
+      - { bit: 2, description: "High Discharge Pressure Alarm" }
+      - { bit: 3, description: "High Discharge Pressure Cutout" }
+      - { bit: 4, description: "High Discharge Temperature Alarm" }
+      - { bit: 5, description: "High Discharge Temperature Cutout" }
+      - { bit: 6, description: "High Oil Temperature Alarm" }
+      - { bit: 7, description: "High Oil Temperature Cutout" }
+      - { bit: 8, description: "Separator Temperature Alarm" }
+      - { bit: 9, description: "Separator Temperature Cutout" }
+      - { bit: 10, description: "Filter Pressure Difference Alarm" }
+      - { bit: 11, description: "Filter Pressure Difference Cutout" }
+      - { bit: 12, description: "Oil Pressure Difference Alarm" }
+      - { bit: 13, description: "Oil Pressure Difference Cutout" }
+      - { bit: 14, description: "Auxiliary Control - 1 Cutout" }
+      - { bit: 15, description: "Aux Control - 2 Cutout" }
+
+  COMP_1_STATUS_2:
+    address: 41339
+    alarms:
+      - { bit: 0, description: "Low Oil Level Alarm" }
+      - { bit: 1, description: "Compressor Feedback Fail" }
+      - { bit: 2, description: "Lubricant Oil Pump Feedback Fail" }
+      - { bit: 3, description: "High Motor Current Alarm" }
+      - { bit: 4, description: "High Motor Current Cutout" }
+      - { bit: 5, description: "Emergency Press Button Pressed" }
+      - { bit: 6, description: "Oil Pump Feedback" }
+      - { bit: 7, description: "Compressor Feedback" }
+      - { bit: 8, description: "Low Oil Temperature Alarm" }
+      - { bit: 9, description: "Low Oil Temperature Cutout" }
+      - { bit: 10, description: "Liquid Slagging Alarm" }
+      - { bit: 11, description: "Liquid Slagging Cutout" }
+      - { bit: 12, description: "Low PHE Chiller Temperature Alarm" }
+      - { bit: 13, description: "Low PHE Chiller Temperature Cutout" }
+      - { bit: 14, description: "Low Motor Current Cutout" }
+      - { bit: 15, description: "SV Position Higher Than 5%" }
+
+  COMP_2_STATUS_1:
+    address: 41400
+    alarms:
+      - { bit: 0, description: "Low Suction Pressure Alarm" }
+      - { bit: 1, description: "Low Suction Pressure Cutout" }
+      - { bit: 2, description: "High Discharge Pressure Alarm" }
+      - { bit: 3, description: "High Discharge Pressure Cutout" }
+      - { bit: 4, description: "High Discharge Temperature Alarm" }
+      - { bit: 5, description: "High Discharge Temperature Cutout" }
+      - { bit: 6, description: "High Oil Temperature Alarm" }
+      - { bit: 7, description: "High Oil Temperature Cutout" }
+      - { bit: 8, description: "Separator Temperature Alarm" }
+      - { bit: 9, description: "Separator Temperature Cutout" }
+      - { bit: 10, description: "Filter Pressure Difference Alarm" }
+      - { bit: 11, description: "Filter Pressure Difference Cutout" }
+      - { bit: 12, description: "Oil Pressure Difference Alarm" }
+      - { bit: 13, description: "Oil Pressure Difference Cutout" }
+      - { bit: 14, description: "Auxiliary Control - 1 Cutout" }
+      - { bit: 15, description: "Aux Control - 2 Cutout" }
+
+  COMP_3_STATUS_1:
+    address: 41462
+    alarms:
+      - { bit: 0, description: "Low Suction Pressure Alarm" }
+      - { bit: 1, description: "Low Suction Pressure Cutout" }
+      - { bit: 2, description: "High Discharge Pressure Alarm" }
+      - { bit: 3, description: "High Discharge Pressure Cutout" }
+      - { bit: 4, description: "High Discharge Temperature Alarm" }
+      - { bit: 5, description: "High Discharge Temperature Cutout" }
+      - { bit: 6, description: "High Oil Temperature Alarm" }
+      - { bit: 7, description: "High Oil Temperature Cutout" }
+      - { bit: 8, description: "Separator Temperature Alarm" }
+      - { bit: 9, description: "Separator Temperature Cutout" }
+      - { bit: 10, description: "Filter Pressure Difference Alarm" }
+      - { bit: 11, description: "Filter Pressure Difference Cutout" }
+      - { bit: 12, description: "Oil Pressure Difference Alarm" }
+      - { bit: 13, description: "Oil Pressure Difference Cutout" }
+      - { bit: 14, description: "Auxiliary Control - 1 Cutout" }
+      - { bit: 15, description: "Aux Control - 2 Cutout" }

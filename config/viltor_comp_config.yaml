@@ -2,7 +2,7 @@ viltor_comp:
   - name: "Viltor Compressor 1"
     ip: "192.168.1.13"
     port: 502
-  - name: "Micro820 Comp-2 Viltor"
+  - name: "Viltor Compressor 2"
     ip: "192.168.1.15"
     port: 502
   - name: "Micro820 Comp-3 Viltor"

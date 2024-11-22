@@ -3,7 +3,7 @@ import yaml
 
 # Input and output file paths
 input_file = "data.json"
-output_file = "plc_points.yaml"
+output_file = "viltor_points.yaml"
 
 try:
     # Load JSON data from the file
