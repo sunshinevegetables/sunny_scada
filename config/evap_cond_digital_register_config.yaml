@@ -1,0 +1,43 @@
+registers:
+  EVAP_COND_1_CTRL_STS:
+    type: DIGITAL
+    description: "Control Status Register for Evaporative Condenser 1"
+    bits:
+      BIT 0: "START"
+      BIT 1: "STOP"
+      BIT 2: "AUTO/MANUAL"
+      BIT 4: "RESET"
+      BIT 6: "PUMP TRIP"
+      BIT 7: "LOCAL/REMOTE"
+      BIT 9: "PUMP ON"
+      BIT 12: "FAIL TO START"
+  EVAP_COND_2_CTRL_STS:
+    type: DIGITAL
+    description: "Control Status Register for Evaporative Condenser 2"
+    bits:
+      BIT 0: "START"
+      BIT 1: "STOP"
+      BIT 2: "AUTO/MANUAL"
+      BIT 4: "RESET"
+      BIT 6: "PUMP TRIP"
+      BIT 7: "LOCAL/REMOTE"
+      BIT 9: "PUMP ON"
+      BIT 12: "FAIL TO START"
+  EVAP_COND_1_CTRL_STS2:
+    type: DIGITAL
+    description: "Fan Control Status Register for Evaporative Condenser 1"
+    bits:
+      BIT 1: "FAN 1"
+      BIT 2: "FAN 2"
+      BIT 3: "FAN 3"
+      BIT 4: "FAN 4"
+      BIT 7: "FAN 1 TRIP"
+      BIT 8: "FAN 2 TRIP"
+      BIT 9: "FAN 4 TRIP"
+      BIT 10: "FAN 3 TRIP"
+  EVAP_COND_PRESSURE_OUT:
+    type: FLOAT
+    description: "Pressure Output of the Evaporative Condenser"
+  EVAP_COND_WT_PMP_1RUN_HR:
+    type: INT
+    description: "Water Pump 1 Runtime Hours"

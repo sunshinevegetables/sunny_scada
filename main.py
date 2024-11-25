@@ -38,6 +38,7 @@ stop_events = {
     "screw": threading.Event(),
     "viltor": threading.Event(),
     "vfd": threading.Event(),
+    "condenser": threading.Event(),
     "hmi": threading.Event(),
     "plc": threading.Event(),
     "alarms": threading.Event(),
@@ -50,6 +51,13 @@ class WriteSignalRequest(BaseModel):
     plc_name: str
     signal_name: str
     value: int
+
+class BitWriteSignalRequest(BaseModel):
+    plc_type: str         # e.g., "screw_comp", "viltor_comp", or "plc"
+    plc_name: str         # Name of the PLC
+    register: str         # Register name (e.g., "COMP_1_STATUS_1")
+    bit: int              # Bit position to write (0-15)
+    value: int            # Value to write (0 or 1)
 
 # Define the request model
 class StartPackhouseRequest(BaseModel):
@@ -122,7 +130,7 @@ def update_plc_data():
                 logger.warning("No data received during PLC read cycle.")
 
             # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 1)))
 
         except FileNotFoundError as e:
             logger.error(f"Configuration or points file not found: {e}")
@@ -130,6 +138,34 @@ def update_plc_data():
         except Exception as e:
             logger.error(f"Unexpected error in PLC thread: {e}")
 
+# Background thread for reading PLC data
+def update_condenser_data():
+    while not stop_events["condenser"].is_set():
+        try:
+            logger.info("Starting Condenser data read cycle...")
+            
+            # Read data from PLCs
+            all_cond_data = plc_reader.read_plcs_from_config(
+                config_file="config/cond_config.yaml",
+                plc_points_file="config/cond_points.yaml",
+                floating_points_file=None,
+                digital_points_file=None
+            )
+
+            # Log and handle the aggregated data if necessary
+            if all_cond_data:
+                logger.debug(f"Aggregated PLC data: {all_cond_data}")
+            else:
+                logger.warning("No data received during PLC read cycle.")
+
+            # Wait for the next polling interval
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
+
+        except FileNotFoundError as e:
+            logger.error(f"Configuration or points file not found: {e}")
+            break  # Break the loop if a critical file is missing
+        except Exception as e:
+            logger.error(f"Unexpected error in PLC thread: {e}")
     
 # Custom lifespan manager using asynccontextmanager
 @asynccontextmanager
@@ -143,6 +179,7 @@ async def lifespan(app: FastAPI):
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
+    threads.append(threading.Thread(target=update_condenser_data, daemon=True))
     main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
     threads.append(main_plc_thread)
     
@@ -184,9 +221,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.route('/api/compressors/screw', methods=['GET'])
+def get_screw_compressors():
+    compressors = [
+        {"name":"Compressor A", "status":"Running"}
+    ]
+    return jsonify(compressors)
+
 @app.get("/plc_data", summary="Get PLC Data", description="Fetch the latest data from all configured PLCs.")
 def get_plc_data():
     return storage.get_data()
+
+@app.post("/bit_write_signal", summary="Write a Bit Signal to PLC", description="Send a bitwise signal to a specific PLC.")
+def bit_write_signal(request: BitWriteSignalRequest):
+    """
+    API endpoint to write a specific bit in a Modbus register.
+    """
+    logger.info(f"Received bit write signal request: {request}")
+    try:
+        # Determine the write points YAML file based on plc_type
+        if request.plc_type == "screw_comp":
+            write_points_path = "config/screw_comp_write_points.yaml"
+        elif request.plc_type == "viltor_comp":
+            write_points_path = "config/viltor_comp_write_points.yaml"
+        elif request.plc_type == "plc":
+            write_points_path = "config/plc_write_points.yaml"
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
+
+        # Load the write points
+        with open(write_points_path, "r") as file:
+            write_signals = yaml.safe_load(file).get("data_points", {})
+
+        # Validate the register and bit
+        if request.register not in write_signals:
+            raise HTTPException(status_code=400, detail=f"Register '{request.register}' not recognized in {write_points_path}.")
+
+        register_info = write_signals[request.register]
+        register_address = register_info.get("register")
+        bits = {bit["bit_name"]: bit["bit"] for bit in register_info.get("bits", [])}
+
+        if register_address is None or request.bit not in bits.values():
+            raise HTTPException(status_code=400, detail=f"Invalid bit '{request.bit}' for register '{request.register}'.")
+
+        # Write the signal using the PLCWriter
+        success = plc_writer.bit_write_signal(request.plc_name, register_address, request.bit, request.value)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to write bit signal.")
+
+        return {"message": f"Successfully wrote value {request.value} to bit {request.bit} of register {request.register} on {request.plc_name}"}
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in bit_write_signal endpoint: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred.")
+
+
 
 @app.post("/write_signal", summary="Write a Signal to PLC", description="Send a signal to a specific PLC.")
 def write_signal(request: WriteSignalRequest):

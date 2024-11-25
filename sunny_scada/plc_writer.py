@@ -170,6 +170,68 @@ class PLCWriter:
         finally:
             client.close()
 
+    def bit_write_signal(self, plc_name, register_address, bit_position, value):
+        """
+        Write a bit to a specific position within a Modbus register.
+
+        :param plc_name: Name of the PLC as specified in the configuration.
+        :param register_address: Address of the Modbus register.
+        :param bit_position: The bit position to modify (0-15).
+        :param value: The value to write (1 or 0).
+        :return: True if successful, False otherwise.
+        """
+        logger.info(f"##### Bit Write Signal #####")
+        logger.info(f"PLC Name: {plc_name}")
+        logger.info(f"Register Address: {register_address}")
+        logger.info(f"Bit Position: {bit_position}")
+        logger.info(f"Value: {value}")
+
+        if plc_name not in self.clients:
+            logger.error(f"PLC '{plc_name}' not found in configuration.")
+            return False
+
+        client = self.clients[plc_name]
+        try:
+            if not client.connect():
+                logger.error(f"Failed to connect to PLC '{plc_name}'")
+                return False
+
+            # Read the current value of the register
+            logger.info(f"Reading current value from register {register_address}")
+            response = client.read_holding_registers(register_address - 40001, 1)
+            if response.isError():
+                logger.error(f"Failed to read register {register_address} from PLC '{plc_name}'.")
+                return False
+
+            current_value = response.registers[0]
+            logger.info(f"Current value of register {register_address}: {current_value}")
+
+            # Perform bitwise operation
+            if value == 1:
+                new_value = current_value | (1 << bit_position)  # Set the bit
+            else:
+                new_value = current_value & ~(1 << bit_position)  # Clear the bit
+
+            logger.info(f"Modified value of register {register_address}: {new_value}")
+
+            # Write the modified value back to the register
+            write_response = client.write_register(register_address - 40001, new_value)
+            if write_response.isError():
+                logger.error(f"Failed to write modified value {new_value} to register {register_address}.")
+                return False
+
+            logger.info(f"Successfully wrote bit {bit_position} with value {value} to register {register_address}.")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error during bit_write_signal for register {register_address}: {e}")
+            return False
+
+        finally:
+            client.close()
+
+
+
     def plc_write_signal(self, plc_name, signal_name, value):
         """
         Write a bit to a specific position within a Modbus register or directly to a register for a generic PLC.

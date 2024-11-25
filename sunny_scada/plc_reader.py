@@ -36,8 +36,10 @@ class PLCReader:
                 return config["vfds"]
             elif "plc" in config:
                 return config["plc"]
+            elif "evap_cond" in config:
+                return config["evap_cond"]
             else:
-                raise ValueError("Invalid configuration file format. Expected 'screw_comp', 'viltor_comp', 'hmis', 'vfds', or 'plcs'.")
+                raise ValueError("Invalid configuration file format. Expected 'evap_cond', 'screw_comp', 'viltor_comp', 'hmis', 'vfds', or 'plcs'.")
         except FileNotFoundError:
             logger.error(f"Configuration file not found: {config_file}")
             raise

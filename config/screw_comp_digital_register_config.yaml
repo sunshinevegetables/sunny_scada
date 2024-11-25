@@ -1,0 +1,49 @@
+registers:
+  COMP_1_WR:
+    type: DIGITAL
+    description: "Control Register for Screw Compressor 1"
+    bits:
+      BIT 0: "START"
+      BIT 1: "STOP"
+      BIT 2: "AUTO/MANUAL"
+      BIT 3: "LOAD"
+      BIT 4: "UNLOAD"
+      BIT 5: "PUMP MANUAL"
+      BIT 6: "ACCEPT"
+      BIT 7: "RESET"
+      BIT 9: "PUMP AUTO"
+  COMP_2_WR:
+    type: DIGITAL
+    description: "Control Register for Screw Compressor 2"
+    bits:
+      BIT 0: "START"
+      BIT 1: "STOP"
+      BIT 2: "AUTO/MANUAL"
+      BIT 3: "LOAD"
+      BIT 4: "UNLOAD"
+      BIT 5: "PUMP MANUAL"
+      BIT 6: "ACCEPT"
+      BIT 7: "RESET"
+      BIT 9: "PUMP AUTO"
+  COMP_3_WR:
+    type: DIGITAL
+    description: "Control Register for Screw Compressor 3"
+    bits:
+      BIT 0: "START"
+      BIT 1: "STOP"
+      BIT 2: "AUTO/MANUAL"
+      BIT 3: "LOAD"
+      BIT 4: "UNLOAD"
+      BIT 5: "PUMP MANUAL"
+      BIT 6: "ACCEPT"
+      BIT 7: "RESET"
+      BIT 9: "PUMP AUTO"
+  COMP_1_SUC_PRESSURE:
+    type: FLOAT
+    description: "Pressure Output of the Evaporative Condenser"
+  COMP_2_SUC_PRESSURE:
+    type: FLOAT
+    description: "Pressure Output of the Evaporative Condenser"
+  COMP_3_SUC_PRESSURE:
+    type: FLOAT
+    description: "Pressure Output of the Evaporative Condenser"

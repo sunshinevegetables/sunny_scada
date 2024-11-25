@@ -1,0 +1,10 @@
+evap_cond:
+  - name: "Evap Cond 1"
+    ip: "192.168.1.10"
+    port: 502
+  - name: "Evap Cond 2"
+    ip: "192.168.1.10"
+    port: 502
+  - name: "Evap Cond 3"
+    ip: "192.168.1.10"
+    port: 502
