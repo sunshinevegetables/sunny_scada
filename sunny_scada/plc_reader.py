@@ -19,33 +19,34 @@ class PLCReader:
         Loads the PLC configuration from the YAML file.
         
         :param config_file: Path to the configuration file
-        :return: Parsed configuration data
+        :return: Parsed configuration data grouped by type (compressors, evap_cond, hmis, vfds, plcs)
         """
         try:
             with open(config_file, 'r') as file:
                 config = yaml.safe_load(file)
 
-            # Identify the correct key based on configuration type
-            if "screw_comp" in config:
-                return config["screw_comp"]
-            elif "viltor_comp" in config:
-                return config["viltor_comp"]
-            elif "hmis" in config:
-                return config["hmis"]
-            elif "vfds" in config:
-                return config["vfds"]
-            elif "plc" in config:
-                return config["plc"]
-            elif "evap_cond" in config:
-                return config["evap_cond"]
-            else:
-                raise ValueError("Invalid configuration file format. Expected 'evap_cond', 'screw_comp', 'viltor_comp', 'hmis', 'vfds', or 'plcs'.")
+            # Validate and return the full configuration structure
+            if not isinstance(config, dict):
+                raise ValueError("Configuration file must contain a dictionary structure.")
+
+            valid_keys = {"screw_comp", "viltor_comp", "evap_cond", "hmis", "vfds", "plcs"}
+            config_data = {}
+
+            for key in valid_keys:
+                if key in config:
+                    config_data[key] = config[key]
+
+            if not config_data:
+                raise ValueError("Configuration file contains no valid keys.")
+            logger.debug(f"Config Data: {config_data}")
+            return config_data
         except FileNotFoundError:
             logger.error(f"Configuration file not found: {config_file}")
             raise
         except Exception as e:
             logger.error(f"Error loading configuration file {config_file}: {e}")
             raise
+
 
     def load_data_points(self, points_file):
         """
@@ -73,6 +74,7 @@ class PLCReader:
         :return: Dictionary of PLC clients
         """
         try:
+            {logger.info(f"Initializing Clinet {plc['name']} ::: {plc['port']} ::: {plc['ip']}") for plc in config}
             return {plc['name']: ModbusTcpClient(plc['ip'], port=plc['port']) for plc in config}
         except KeyError as e:
             logger.error(f"Missing key in PLC configuration: {e}")
@@ -125,6 +127,9 @@ class PLCReader:
                 # Read all required data points
                 for description, modbus_address in data_points.items():
                     register_address = modbus_address - 40001  # Adjust for pymodbus 0-based indexing
+                    
+                    logger.debug(f"Modbus Address::: {modbus_address} || Register Address::: {register_address} ||| Description ::: {description}")
+
                     response = client.read_holding_registers(register_address, 1)
                     if response and not response.isError():
                         plc_data[description] = response.registers[0]
@@ -199,92 +204,89 @@ class PLCReader:
 
     
 
-    def read_plcs_from_config(self, config_file, plc_points_file, floating_points_file, digital_points_file):
-            """
-            Reads data from all PLCs defined in the specified configuration file using both integer and floating-point data points.
+    def read_plcs_from_config(self, config_file, plc_points_file=None, floating_points_file=None, digital_points_file=None):
+        """
+        Reads data from all PLCs, compressors, condensers, etc., defined in the specified configuration file.
 
-            :param config_file: Path to the PLC configuration file
-            :param plc_points_file: Path to the integer data points file
-            :param floating_points_file: Path to the floating-point data points file
-            :return: Dictionary containing combined data read from PLCs, keyed by PLC name
-            """
-            logger.info(f"Config File: {config_file}")
-            logger.info(f"Points File: {plc_points_file}")
-            logger.info(f"Points File: {floating_points_file}")
-            logger.info(f"Points File: {digital_points_file}")
-            try:
-                # Load PLC configuration
-                plc_config = self.load_config(config_file)
-                logger.debug(f"Configurations: {plc_config}")
-                if not plc_config:
-                    logger.error(f"PLC configuration file is empty or invalid: {config_file}")
-                    return None
+        :param config_file: Path to the consolidated configuration file (e.g., config.yaml).
+        :param plc_points_file: Path to the integer data points file.
+        :param floating_points_file: Path to the floating-point data points file.
+        :param digital_points_file: Path to the digital data points file.
+        :return: Dictionary containing combined data read from PLCs, keyed by device type and name.
+        """
+        try:
+            # Load the consolidated configuration
+            config_data = self.load_config(config_file)
+            logger.debug(f"Read PLC FROM CONFIG DATA:: {config_data}")
+            if not config_data:
+                raise ValueError("Configuration file is empty or invalid.")
 
-                # Load integer-based data points
-                data_points = self.load_data_points(plc_points_file)
-                logger.debug(f"Data Points: {data_points}")
-                if not data_points:
-                    logger.error(f"Data points file is empty or invalid: {plc_points_file}")
-                    return None
-                floating_points={}
-                # Load floating-point data points
-                if floating_points_file:
-                    floating_points = self.load_data_points(floating_points_file)
-                    if not floating_points:
-                        logger.warning(f"Floating points file is empty or invalid: {floating_points_file}")
-                        floating_points = {}  # Fallback to an empty dictionary
+            # Ensure the config contains valid sections
+            valid_sections = {"viltor_comp", "screw_comp", "evap_cond", "hmis", "vfds", "plcs"}
+            if not valid_sections.intersection(config_data.keys()):
+                raise ValueError(f"Invalid configuration file format. Expected one of {valid_sections}.")
 
-                digital_points={}
-                # Load floating-point data points
-                if digital_points_file:
-                    digital_points = self.load_data_points(digital_points_file)
-                    if not digital_points:
-                        logger.warning(f"Digital points file is empty or invalid: {digital_points_file}")
-                        digital_points = {}  # Fallback to an empty dictionary
+            # Load data points
+            data_points = self.load_data_points(plc_points_file) if plc_points_file else {}
+            #logger.info(f"Data Points: {data_points}")
+            #floating_points = self.load_data_points(floating_points_file) if floating_points_file else {}
+            #logger.info(f"Floating Points: {floating_points}")
+            #digital_points = self.load_data_points(digital_points_file) if digital_points_file else {}
+            #logger.info(f"Digital Points: {digital_points}")
 
-                # Initialize Modbus clients
-                clients = self.initialize_clients(plc_config)
-                if not clients:
-                    logger.error("Failed to initialize Modbus clients.")
-                    return None
+            # Initialize Modbus clients for all devices
+            devices = []
+            for key in valid_sections:
+                devices += config_data.get(key, [])
+            logger.debug(f"Devices:: {devices}")
+            clients = self.initialize_clients(devices)
+            if not clients:
+                logger.error("Failed to initialize Modbus clients.")
+                return None
 
-                # Dictionary to store combined PLC data
-                all_plc_data = {}
+            all_device_data = {}
 
-                # Read data for integer points
-                for plc in plc_config:
-                    client = clients.get(plc["name"])
-                    if client is None:
-                        logger.error(f"No client found for PLC '{plc['name']}'. Skipping...")
+            # Iterate through sections in the configuration
+            for section, devices in config_data.items():
+                logger.info(f"################# Section:{section} ####################")
+                if section not in valid_sections:
+                    continue
+
+                section_data = {}
+                for device in devices:
+                    client = clients.get(device["name"])
+                    logger.info(f":::::::::::::: {client} :::::::::::::::::::")
+                    if not client:
+                        logger.error(f"No client found for device '{device['name']}'. Skipping...")
                         continue
 
-                    logger.info(f"Reading integer data points from PLC '{plc['name']}' at IP {plc['ip']}...")
-                    int_data = self.read_plc(plc, client, data_points, None, None)
-                    #logger.debug(f"Integer data read from '{plc['name']}': {int_data}")
+                    logger.debug(f"Reading data points for {section} '{device['name']}' at {device['ip']}...")
+                    int_data = self.read_plc(device, client, data_points, None, None)
+                    float_data = self.read_plc(device, client, None, None, None)
+                    digital_data = self.read_plc(device, client, None, None, None)
 
-                    logger.info(f"Reading floating-point data points from PLC '{plc['name']}' at IP {plc['ip']}...")
-                    float_data = self.read_plc(plc, client, None, floating_points, None)
-                    #logger.debug(f"Floating-point data read from '{plc['name']}': {float_data}")
-                    
-                    logger.info(f"Reading digital data points from PLC '{plc['name']}' at IP {plc['ip']}...")
-                    float_data = self.read_plc(plc, client, None, None, digital_points)
-                    #logger.debug(f"Floating-point data read from '{plc['name']}': {float_data}")
+                    # Combine data
+                    combined_data = {**int_data, **float_data, **digital_data}
+                    section_data[device["name"]] = combined_data
 
-                    # Combine integer and floating-point data
-                    combined_data = {**int_data, **float_data}
-                    all_plc_data[plc["name"]] = combined_data
+                    # Update storage
+                    self.storage.update_data(device["name"], combined_data)
 
-                    # Update storage with combined data
-                    self.storage.update_data(plc["name"], combined_data)
+                all_device_data[section] = section_data
 
-                return all_plc_data
+            return all_device_data
 
-            except FileNotFoundError as e:
-                logger.error(f"Configuration file not found: {e}")
-                return None
-            except Exception as e:
-                logger.error(f"Unexpected error while processing configuration file {config_file}: {e}")
-                return None
+        except FileNotFoundError as e:
+            logger.error(f"Configuration file not found: {e}")
+            return None
+        except ValueError as e:
+            logger.error(f"Error loading configuration file {config_file}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error while processing configuration file {config_file}: {e}")
+            return None
+
+
 
 
 

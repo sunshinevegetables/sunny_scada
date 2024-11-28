@@ -39,6 +39,7 @@ stop_events = {
     "viltor": threading.Event(),
     "vfd": threading.Event(),
     "condenser": threading.Event(),
+    "compressor": threading.Event(),
     "hmi": threading.Event(),
     "plc": threading.Event(),
     "alarms": threading.Event(),
@@ -70,7 +71,7 @@ def update_screw_data():
         try:
             logger.info("Reading screw compressor data...")
             plc_reader.read_plcs_from_config(
-                config_file="config/screw_comp_config.yaml",
+                config_file="config/config.yaml",
                 plc_points_file="config/screw_comp_points.yaml",
                 floating_points_file=None,
                 digital_points_file=None
@@ -84,7 +85,7 @@ def update_viltor_data():
     while not stop_events["viltor"].is_set():
         try:
             logger.info("Reading viltor compressor data...")
-            plc_reader.read_plcs_from_config("config/viltor_comp_config.yaml", "config/viltor_comp_points.yaml", None, None)
+            plc_reader.read_plcs_from_config("config/config.yaml", "config/viltor_comp_points.yaml", None, None)
             time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
         except Exception as e:
             logger.error(f"Error in compressor thread: {e}")
@@ -117,11 +118,11 @@ def update_plc_data():
             
             # Read data from PLCs
             all_plc_data = plc_reader.read_plcs_from_config(
-                config_file="config/plc_config.yaml",
+                config_file="config/config.yaml",
                 plc_points_file="config/plc_points.yaml",
                 floating_points_file="config/floating_points.yaml",
                 digital_points_file="config/digital_points.yaml"
-            )
+            )   
 
             # Log and handle the aggregated data if necessary
             if all_plc_data:
@@ -167,6 +168,65 @@ def update_condenser_data():
         except Exception as e:
             logger.error(f"Unexpected error in PLC thread: {e}")
     
+# Background thread for reading Compressor data
+def update_screw_compressor_data():
+    while not stop_events["compressor"].is_set():
+        try:
+            logger.info("Starting Compressor data read cycle...")
+            
+            # Read data from PLCs
+            all_comp_data = plc_reader.read_plcs_from_config(
+                config_file="config/config.yaml",
+                plc_points_file="config/screw_comp_points.yaml",
+                floating_points_file="config/screw_comp_floating_points.yaml",  # If applicable
+                digital_points_file="config/screw_comp_digital_points.yaml"     # If applicable
+            )
+
+            # Log and handle the aggregated data if necessary
+            if all_comp_data:
+                logger.debug(f"Aggregated Compressor data: {all_comp_data}")
+            else:
+                logger.warning("No data received during PLC read cycle.")
+
+            # Wait for the next polling interval
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
+
+        except FileNotFoundError as e:
+            logger.error(f"Configuration or points file not found: {e}")
+            break  # Break the loop if a critical file is missing
+        except Exception as e:
+            logger.error(f"Unexpected error in Compressor thread: {e}")
+
+# Background thread for reading Viltor data
+def update_viltor_compressor_data():
+    while not stop_events["viltor"].is_set():
+        try:
+            logger.info("Starting Viltor data read cycle...")
+            
+            # Read data from PLCs
+            all_viltor_data = plc_reader.read_plcs_from_config(
+                config_file="config/config.yaml",
+                plc_points_file="config/viltor_comp_points.yaml",
+                floating_points_file="config/viltor_comp_floating_points.yaml",  # If applicable
+                digital_points_file="config/viltor_comp_digital_points.yaml"     # If applicable
+            )
+
+            # Log and handle the aggregated data if necessary
+            if all_viltor_data:
+                logger.debug(f"Aggregated Viltor data: {all_viltor_data}")
+            else:
+                logger.warning("No data received during PLC read cycle.")
+
+            # Wait for the next polling interval
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
+
+        except FileNotFoundError as e:
+            logger.error(f"Configuration or points file not found: {e}")
+            break  # Break the loop if a critical file is missing
+        except Exception as e:
+            logger.error(f"Unexpected error in Viltor thread: {e}")
+
+
 # Custom lifespan manager using asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -179,8 +239,11 @@ async def lifespan(app: FastAPI):
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
-    threads.append(threading.Thread(target=update_condenser_data, daemon=True))
+    #threads.append(threading.Thread(target=update_screw_compressor_data, daemon=True))
+    #threads.append(threading.Thread(target=update_condenser_data, daemon=True))
+    #threads.append(threading.Thread(target=update_viltor_compressor_data, daemon=True))
     main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
+    
     threads.append(main_plc_thread)
     
    
@@ -435,7 +498,7 @@ def monitor_screw_comp_suction_pressure():
     """
     Monitors the suction pressure for all screw compressors defined in the configuration.
 
-    - Loads the screw_comp_config file.
+    - Loads the config file.
     - Fetches data from the shared storage.
     - Loops through each screw compressor in the configuration.
     - Logs a warning if the suction pressure exceeds 45.
@@ -445,7 +508,7 @@ def monitor_screw_comp_suction_pressure():
             logger.info("Starting suction pressure monitoring...")
 
             # Load the screw compressor configuration
-            config_file = "config/screw_comp_config.yaml"
+            config_file = "config/config.yaml"
             screw_comps = plc_reader.load_config(config_file)
 
             if not screw_comps:
@@ -491,7 +554,7 @@ def monitor_viltor_comp_suction_pressure():
     """
     Monitors the suction pressure for all Viltor compressors defined in the configuration.
 
-    - Loads the viltor_comp_config file.
+    - Loads the config file.
     - Fetches data from the shared storage.
     - Loops through each Viltor compressor in the configuration.
     - Logs a warning if the suction pressure exceeds 45.
@@ -501,7 +564,7 @@ def monitor_viltor_comp_suction_pressure():
             logger.info("Starting Viltor compressor suction pressure monitoring...")
 
             # Load the Viltor compressor configuration
-            config_file = "config/viltor_comp_config.yaml"
+            config_file = "config/config.yaml"
             viltor_comps = plc_reader.load_config(config_file)
 
             if not viltor_comps:
