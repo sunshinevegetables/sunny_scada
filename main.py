@@ -119,9 +119,7 @@ def update_plc_data():
             # Read data from PLCs
             all_plc_data = plc_reader.read_plcs_from_config(
                 config_file="config/config.yaml",
-                plc_points_file="config/plc_points.yaml",
-                floating_points_file="config/floating_points.yaml",
-                digital_points_file="config/digital_points.yaml"
+                data_points_file="config/data_points.yaml"
             )   
 
             # Log and handle the aggregated data if necessary

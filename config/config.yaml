@@ -1,37 +1,37 @@
-screw_comp:
-  - name: "Screw Compressor 1"
-    ip: "192.168.1.5"
-    port: 502
-  - name: "Screw Compressor 2"
-    ip: "192.168.1.7"
-    port: 502
-  - name: "Screw Compressor 3"
-    ip: "192.168.1.9"
-    port: 502
-  - name: "Screw Compressor 4"
-    ip: "192.168.1.11"
-    port: 502
+#screw_comp:
+#  - name: "Screw Compressor 1"
+#    ip: "192.168.1.5"
+#    port: 502
+#  - name: "Screw Compressor 2"
+#    ip: "192.168.1.7"
+#    port: 502
+#  - name: "Screw Compressor 3"
+#    ip: "192.168.1.9"
+#    port: 502
+#  - name: "Screw Compressor 4"
+#    ip: "192.168.1.11"
+#    port: 502
 
-viltor_comp:
-  - name: "Viltor Compressor 1"
-    ip: "192.168.1.13"
-    port: 502
-  - name: "Viltor Compressor 2"
-    ip: "192.168.1.15"
-    port: 502
-  - name: "Viltor Compressor 3"
-    ip: "192.168.1.17"
-    port: 502
+#viltor_comp:
+#  - name: "Viltor Compressor 1"
+#    ip: "192.168.1.13"
+#    port: 502
+#  - name: "Viltor Compressor 2"
+#    ip: "192.168.1.15"
+#    port: 502
+#  - name: "Viltor Compressor 3"
+#    ip: "192.168.1.17"
+#    port: 502
 
 plcs:
   - name: "Main PLC"
     ip: "192.168.1.10"
     port: 502
 
-hmis:
-  - name: "IQF Panel"
-    ip: "192.168.0.2"
-    port: 502
+#hmis:
+#  - name: "IQF Panel"
+#    ip: "192.168.0.112"
+#    port: 502
 
 #vfds:
 #  - name: "VFD 1"

@@ -74,7 +74,7 @@ class PLCReader:
         :return: Dictionary of PLC clients
         """
         try:
-            {logger.info(f"Initializing Clinet {plc['name']} ::: {plc['port']} ::: {plc['ip']}") for plc in config}
+            {logger.debug(f"Initializing Clinet {plc['name']} ::: {plc['port']} ::: {plc['ip']}") for plc in config}
             return {plc['name']: ModbusTcpClient(plc['ip'], port=plc['port']) for plc in config}
         except KeyError as e:
             logger.error(f"Missing key in PLC configuration: {e}")
@@ -107,15 +107,15 @@ class PLCReader:
             logger.error(f"Error converting registers {high_register}, {low_register} to float: {e}")
             return None
 
-    def read_plc(self, plc, client, data_points=None, floating_points=None, digital_points=None):
+    def read_plc(self, plc, client, data_points, parent_key=""):
         """
         Reads data from a single PLC and maps the values to descriptive names.
 
         :param plc: PLC configuration dictionary.
         :param client: ModbusTcpClient instance for the PLC.
-        :param data_points: Dictionary of data points for the PLC type.
-        :param floating_points: Dictionary of floating-point data points (optional).
-        :return: Dictionary of read data.
+        :param data_points: Dictionary of consolidated data points or nested structures.
+        :param parent_key: Key of the parent section for hierarchical grouping.
+        :return: Dictionary of read data with structured values.
         """
         if not client.connect():
             logger.error(f"Failed to connect to {plc['name']} at {plc['ip']}")
@@ -123,77 +123,87 @@ class PLCReader:
 
         plc_data = {}
         try:
-            if data_points:
-                # Read all required data points
-                for description, modbus_address in data_points.items():
-                    register_address = modbus_address - 40001  # Adjust for pymodbus 0-based indexing
-                    
-                    logger.debug(f"Modbus Address::: {modbus_address} || Register Address::: {register_address} ||| Description ::: {description}")
+            for point_name, point_details in data_points.items():
+                if isinstance(point_details, dict) and "address" not in point_details:
+                    # Nested structure, recurse
+                    logger.debug(f"Processing nested data point group: {point_name}")
+                    nested_data = self.read_plc(plc, client, point_details, point_name)
+                    plc_data[point_name] = nested_data
+                    continue
 
+                # Process individual data point
+                address = point_details.get("address")
+                data_type = point_details.get("type")
+                description = point_details.get("description")
+                if not address or not data_type:
+                    logger.warning(f"Invalid data point configuration for '{point_name}'. Skipping...")
+                    continue
+
+                register_address = address - 40001  # Adjust for pymodbus 0-based indexing
+
+                if data_type == "INTEGER":
+                    # Read integer value
                     response = client.read_holding_registers(register_address, 1)
                     if response and not response.isError():
-                        plc_data[description] = response.registers[0]
+                        value = response.registers[0]
+                        plc_data[point_name] = {
+                            "description": description,
+                            "type": data_type,
+                            "value": value
+                        }
                     else:
-                        logger.warning(f"Failed to read {description} ({modbus_address}) from {plc['name']}")
-
-            # Process floating-point data points if provided
-            if floating_points:
-                for description, modbus_address in floating_points.items():
-                    try:
-                        high_register_address = modbus_address - 40001
-                        response = client.read_holding_registers(high_register_address, 2)
-                        if response and not response.isError():
-                            high_register, low_register = response.registers
-
-                            # Log raw register values before conversion
-                            logger.debug(
-                                f"Reading {description} ({modbus_address}): High Register={high_register}, Low Register={low_register}"
-                            )
-
-                            float_value = self.convert_to_float(high_register, low_register)
-                            if float_value is not None:
-                                logger.debug(f"Converted {description} ({modbus_address}) to float: {float_value}")
-                                plc_data[description] = float_value
-                            else:
-                                logger.warning(f"Failed to convert {description} ({modbus_address}) to float.")
-                        else:
-                            logger.warning(f"Failed to read {description} ({modbus_address}) from {plc['name']}")
-                    except Exception as e:
-                        logger.error(f"Error reading {description} ({modbus_address}) from {plc['name']}: {e}")
-            # Read digital signals
-            if digital_points:
-                for description, details in digital_points.items():
-                    address = details.get("address")
-                    alarms = details.get("alarms", [])
-
-                    if address is None or not alarms:
-                        logger.warning(f"No valid address or alarms defined for {description}")
-                        continue
-
-                    coil_address = address - 40001  # Adjust for pymodbus 0-based indexing
-                    
-                    # Read the coil/register value for the alarms
-                    response = client.read_holding_registers(coil_address, 1)
+                        logger.warning(f"Failed to read integer '{point_name}' ({address}) from {plc['name']}")
+                
+                elif data_type == "FLOAT":
+                    # Read floating-point value (2 registers)
+                    response = client.read_holding_registers(register_address, 2)
+                    if response and not response.isError():
+                        high_register, low_register = response.registers
+                        value = self.convert_to_float(high_register, low_register)
+                        plc_data[point_name] = {
+                            "description": description,
+                            "type": data_type,
+                            "value": value
+                        }
+                    else:
+                        logger.warning(f"Failed to read float '{point_name}' ({address}) from {plc['name']}")
+                
+                elif data_type == "DIGITAL":
+                    # Read digital signal (single register, multiple bits)
+                    response = client.read_holding_registers(register_address, 1)
                     if response and not response.isError():
                         register_value = response.registers[0]
-
-                        # Parse individual alarm bits
-                        alarm_statuses = {}
-                        for alarm in alarms:
-                            bit = alarm.get("bit")
-                            alarm_description = alarm.get("description")
-
-                            if bit is not None and alarm_description:
-                                # Evaluate bit status (0 or 1)
-                                bit_status = bool(register_value & (1 << bit))
-                                alarm_statuses[alarm_description] = bit_status
-                                logger.info(f"{description} - {alarm_description}: {'ON' if bit_status else 'OFF'}")
-                            else:
-                                logger.warning(f"Invalid alarm configuration for {description}: {alarm}")
-
-                        plc_data[description] = alarm_statuses
+                        #logger.info(f"Point Details: {point_details}")
+                        
+                        # Parse the bit structure from the YAML
+                        bits = point_details.get("bits", {})
+                        #logger.info(f"BITS: {bits}")
+                        
+                        bit_statuses = {}
+                        for bit_label, bit_description in bits.items():
+                            # Extract bit position from the bit label (e.g., "BIT 0")
+                            try:
+                                bit_position = int(bit_label.replace("BIT ", ""))
+                            except ValueError:
+                                logger.warning(f"Invalid bit label '{bit_label}' for point '{point_name}'. Skipping...")
+                                continue
+                            
+                            # Evaluate bit status (0 or 1)
+                            bit_status = bool(register_value & (1 << bit_position))
+                            bit_statuses[bit_label] = {
+                                "description": bit_description,
+                                "value": bit_status
+                            }
+                        
+                        # Add the parsed digital data to the response
+                        plc_data[point_name] = {
+                            "description": description,
+                            "type": data_type,
+                            "value": bit_statuses
+                        }
                     else:
-                        logger.warning(f"Failed to read digital signal {description} ({address}) from PLC.")
+                        logger.warning(f"Failed to read digital '{point_name}' ({address}) from {plc['name']}")
+
 
         except Exception as e:
             logger.error(f"Error reading from {plc['name']} at {plc['ip']}: {e}")
@@ -202,43 +212,30 @@ class PLCReader:
 
         return plc_data
 
-    
 
-    def read_plcs_from_config(self, config_file, plc_points_file=None, floating_points_file=None, digital_points_file=None):
+
+
+    def read_plcs_from_config(self, config_file, data_points_file):
         """
         Reads data from all PLCs, compressors, condensers, etc., defined in the specified configuration file.
 
         :param config_file: Path to the consolidated configuration file (e.g., config.yaml).
-        :param plc_points_file: Path to the integer data points file.
-        :param floating_points_file: Path to the floating-point data points file.
-        :param digital_points_file: Path to the digital data points file.
+        :param data_points_file: Path to the consolidated data points file.
         :return: Dictionary containing combined data read from PLCs, keyed by device type and name.
         """
         try:
-            # Load the consolidated configuration
+            # Load the consolidated configuration and data points
             config_data = self.load_config(config_file)
-            logger.debug(f"Read PLC FROM CONFIG DATA:: {config_data}")
-            if not config_data:
-                raise ValueError("Configuration file is empty or invalid.")
-
-            # Ensure the config contains valid sections
-            valid_sections = {"viltor_comp", "screw_comp", "evap_cond", "hmis", "vfds", "plcs"}
-            if not valid_sections.intersection(config_data.keys()):
-                raise ValueError(f"Invalid configuration file format. Expected one of {valid_sections}.")
-
-            # Load data points
-            data_points = self.load_data_points(plc_points_file) if plc_points_file else {}
+            #logger.info(f"Config Data: {config_data}")
+            data_points = self.load_data_points(data_points_file)
             #logger.info(f"Data Points: {data_points}")
-            #floating_points = self.load_data_points(floating_points_file) if floating_points_file else {}
-            #logger.info(f"Floating Points: {floating_points}")
-            #digital_points = self.load_data_points(digital_points_file) if digital_points_file else {}
-            #logger.info(f"Digital Points: {digital_points}")
+            if not config_data or not data_points:
+                raise ValueError("Configuration or data points file is empty or invalid.")
 
             # Initialize Modbus clients for all devices
             devices = []
-            for key in valid_sections:
-                devices += config_data.get(key, [])
-            logger.debug(f"Devices:: {devices}")
+            for section_devices in config_data.values():
+                devices += section_devices
             clients = self.initialize_clients(devices)
             if not clients:
                 logger.error("Failed to initialize Modbus clients.")
@@ -248,29 +245,19 @@ class PLCReader:
 
             # Iterate through sections in the configuration
             for section, devices in config_data.items():
-                logger.info(f"################# Section:{section} ####################")
-                if section not in valid_sections:
-                    continue
-
                 section_data = {}
                 for device in devices:
                     client = clients.get(device["name"])
-                    logger.info(f":::::::::::::: {client} :::::::::::::::::::")
                     if not client:
                         logger.error(f"No client found for device '{device['name']}'. Skipping...")
                         continue
 
-                    logger.debug(f"Reading data points for {section} '{device['name']}' at {device['ip']}...")
-                    int_data = self.read_plc(device, client, data_points, None, None)
-                    float_data = self.read_plc(device, client, None, None, None)
-                    digital_data = self.read_plc(device, client, None, None, None)
-
-                    # Combine data
-                    combined_data = {**int_data, **float_data, **digital_data}
-                    section_data[device["name"]] = combined_data
+                    logger.info(f"Reading data points for {section} '{device['name']}' at {device['ip']}...")
+                    device_data = self.read_plc(device, client, data_points.get(section, {}))
+                    section_data[device["name"]] = device_data
 
                     # Update storage
-                    self.storage.update_data(device["name"], combined_data)
+                    self.storage.update_data(device["name"], device_data)
 
                 all_device_data[section] = section_data
 
@@ -280,11 +267,12 @@ class PLCReader:
             logger.error(f"Configuration file not found: {e}")
             return None
         except ValueError as e:
-            logger.error(f"Error loading configuration file {config_file}: {e}")
+            logger.error(f"Error loading configuration or data points file: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error while processing configuration file {config_file}: {e}")
+            logger.error(f"Unexpected error while processing configuration or data points file: {e}")
             return None
+
 
 
 

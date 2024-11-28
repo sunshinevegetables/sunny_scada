@@ -1,0 +1,795 @@
+data_points:
+  plcs:
+    comp:
+      screw:
+        comp_1:
+          write:
+            COMP_1_WR:
+              type: DIGITAL
+              description: "Write on Compressor 1"
+              address: 41336
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "LOAD"
+                BIT 4: "UNLOAD"
+                BIT 5: "PUMP MANUAL"
+                BIT 6: "ANN ACCEPT"
+                BIT 7: "RESET"
+                BIT 9: "PUMP AUTO"
+        
+            COMP_1_WR_MODE:
+              type: INTEGER
+              description: "Write mode for Compressor 1 from remote"
+              address: 41337
+          read:
+            COMP_1_STATUS_1:
+              type: INTEGER
+              description: "Compressor 1 Status Register 1"
+              address: 41338
+            COMP_1_STATUS_2:
+              type: INTEGER
+              description: "Compressor 1 Status Register 2"
+              address: 41339
+            COMP_1_SUCTION_TEMP:
+              type: INTEGER
+              description: "Suction Temperature of Compressor 1"
+              address: 41228
+            COMP_1_DISCHARGE_TEMP:
+              type: INTEGER
+              description: "Discharge Temperature of Compressor 1"
+              address: 41210
+            COMP_1_OIL_TEMP:
+              type: INTEGER
+              description: "Oil Temperature of Compressor 1"
+              address: 41218
+            COMP_1_SEPERATOR_TEMP:
+              type: INTEGER
+              description: "Separator Temperature of Compressor 1"
+              address: 41224
+        comp_2:
+          write:
+            COMP_2_WR:
+              type: DIGITAL
+              description: "Write on Compressor 2"
+              address: 41340
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "LOAD"
+                BIT 4: "UNLOAD"
+                BIT 5: "PUMP MANUAL"
+                BIT 6: "ANN ACCEPT"
+                BIT 7: "RESET"
+                BIT 9: "PUMP AUTO"
+            COMP_2_WR_MODE:
+              type: INTEGER
+              description: "Write mode for Compressor 2"
+              address: 41341
+          read:
+            COMP_2_STATUS_1:
+              type: INTEGER
+              description: "Compressor 2 Status Register 1"
+              address: 41342
+            COMP_2_STATUS_2:
+              type: INTEGER
+              description: "Compressor 2 Status Register 2"
+              address: 41343
+            COMP_2_SUCTION_TEMP:
+              type: INTEGER
+              description: "Suction Temperature of Compressor 2"
+              address: 41260
+            COMP_2_DISCHARGE_TEMP:
+              type: INTEGER
+              description: "Discharge Temperature of Compressor 2"
+              address: 41242
+            COMP_2_OIL_TEMP:
+              type: INTEGER
+              description: "Oil Temperature of Compressor 2"
+              address: 41250
+            COMP_2_SEPERATOR_TEMP:
+              type: INTEGER
+              description: "Separator Temperature of Compressor 2"
+              address: 41256
+        comp_3:
+          write:
+            COMP_3_WR:
+              type: DIGITAL
+              description: "Write on Compressor 3"
+              address: 41344
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "LOAD"
+                BIT 4: "UNLOAD"
+                BIT 5: "PUMP MANUAL"
+                BIT 6: "ANN ACCEPT"
+                BIT 7: "RESET"
+                BIT 9: "PUMP AUTO"
+            COMP_3_WR_MODE:
+              type: INTEGER
+              description: "Write mode for Compressor 3"
+              address: 41345
+          read:
+            COMP_3_STATUS_1:
+              type: INTEGER
+              description: "Compressor 3 Status Register 1"
+              address: 41346
+            COMP_3_STATUS_2:
+              type: INTEGER
+              description: "Compressor 3 Status Register 2"
+              address: 41347
+            COMP_3_SUCTION_TEMP:
+              type: INTEGER
+              description: "Suction Temperature of Compressor 3"
+              address: 41278
+            COMP_3_DISCHARGE_TEMP:
+              type: INTEGER
+              description: "Discharge Temperature of Compressor 3"
+              address: 41280
+            COMP_3_OIL_TEMP:
+              type: INTEGER
+              description: "Oil Temperature of Compressor 3"
+              address: 41282
+            COMP_3_SEPERATOR_TEMP:
+              type: INTEGER
+              description: "Separator Temperature of Compressor 3"
+              address: 41284
+        comp_4:
+          write:
+            COMP_4_WR:
+              type: DIGITAL
+              description: "Write on Compressor 4"
+              address: 41348
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "LOAD"
+                BIT 4: "UNLOAD"
+                BIT 5: "PUMP MANUAL"
+                BIT 6: "ANN ACCEPT"
+                BIT 7: "RESET"
+                BIT 9: "PUMP AUTO"
+            COMP_4_WR_MODE:
+              type: INTEGER
+              description: "Write mode for Compressor 4"
+              address: 41349
+          read:
+            COMP_4_STATUS_1:
+              type: INTEGER
+              description: "Compressor 4 Status Register 1"
+              address: 41350
+            COMP_4_STATUS_2:
+              type: INTEGER
+              description: "Compressor 4 Status Register 2"
+              address: 41351
+            COMP_4_SUCTION_TEMP:
+              type: INTEGER
+              description: "Suction Temperature of Compressor 4"
+              address: 41308
+            COMP_4_DISCHARGE_TEMP:
+              type: INTEGER
+              description: "Discharge Temperature of Compressor 4"
+              address: 41310
+            COMP_4_OIL_TEMP:
+              type: INTEGER
+              description: "Oil Temperature of Compressor 4"
+              address: 41312
+            COMP_4_SEPERATOR_TEMP:
+              type: INTEGER
+              description: "Separator Temperature of Compressor 4"
+              address: 41314
+            COMP4_1_MASTER_FROM_SCADA:
+              type: DIGITAL
+              description: "Master Selection for Compressor 4 Subcomponent 1"
+              address: 40340
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+
+    cond:
+      evap:
+        evap_cond_1:
+          write:
+            EVAP_COND_1_CTRL_STS:
+              type: DIGITAL
+              description: "Control Evaporative Condenser 1"
+              address: 42022
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "FAN ON"
+                BIT 12: "FAIL TO START"
+            EVAP_COND_1_CTRL_STS2:
+              type: DIGITAL
+              description: "Secondary Control for Evaporative Condenser 1"
+              address: 42040
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "FAN ON"
+                BIT 12: "FAIL TO START"
+          read:
+            EVAP_COND_PRESSURE_OUT:
+              type: INTEGER
+              description: "Pressure Output for Evaporative Condenser 1"
+              address: 40424
+            EVAP_COND_SP_SLV1:
+              type: INTEGER
+              description: "Set Point Slave 1 for Evaporative Condenser 1"
+              address: 40444
+            EVAP_COND_DEDBND_SLV_1:
+              type: INTEGER
+              description: "Deadband Slave 1 for Evaporative Condenser 1"
+              address: 40448
+        evap_cond_2:
+          write:
+            EVAP_COND_2_CTRL_STS:
+              type: DIGITAL
+              description: "Control Evaporative Condenser 2"
+              address: 42023
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "FAN ON"
+                BIT 12: "FAIL TO START"
+            EVAP_COND_2_CTRL_STS2:
+              type: DIGITAL
+              description: "Secondary Control for Evaporative Condenser 2"
+              address: 42041
+          read:
+            EVAP_COND_SP_SLV2:
+              type: INTEGER
+              description: "Set Point Slave 2 for Evaporative Condenser 2"
+              address: 40450
+            EVAP_COND_DEDBND_SLV_2:
+              type: INTEGER
+              description: "Deadband Slave 2 for Evaporative Condenser 2"
+              address: 40454
+            EVAP_COND_PRESSURE_MIN:
+              type: INTEGER
+              description: "Minimum Pressure for Evaporative Condenser 2"
+              address: 40428
+            EVAP_COND_PRESSURE_MAX:
+              type: INTEGER
+              description: "Maximum Pressure for Evaporative Condenser 2"
+              address: 40430
+        evap_cond_3:
+          write:
+            EVAP_COND_3_CTRL_STS:
+              type: DIGITAL
+              description: "Control Evaporative Condenser 3"
+              address: 42037
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "FAN ON"
+                BIT 12: "FAIL TO START"
+            EVAP_COND_3_CTRL_STS2:
+              type: DIGITAL
+              description: "Secondary Control for Evaporative Condenser 3"
+              address: 42042
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          read:
+            EVAP_COND_STT_TIME_SLV1:
+              type: INTEGER
+              description: "Start Time Slave 1 for Evaporative Condenser 3"
+              address: 40456
+            EVAP_COND_STT_TIME_ACT_SLV1:
+              type: INTEGER
+              description: "Actual Start Time Slave 1 for Evaporative Condenser 3"
+              address: 40458
+            EVAP_COND_STP_TIME_SLV1:
+              type: INTEGER
+              description: "Stop Time Slave 1 for Evaporative Condenser 3"
+              address: 40460
+            EVAP_COND_STP_TIME_ACT_SLV1:
+              type: INTEGER
+              description: "Actual Stop Time Slave 1 for Evaporative Condenser 3"
+              address: 40462
+        wt_pumps:
+          write:
+            EVAP_COND_WT_PUMP1_CTRL_STS:
+              type: DIGITAL
+              description: "Water Pump Control Status for Condenser 1"
+              address: 42026
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+            EVAP_COND2_WT_PUMP1_CTRL_STS:
+              type: DIGITAL
+              description: "Water Pump Control Status for Condenser 2"
+              address: 42028
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          read:
+            EVAP_COND_WT_PMP_1RUN_HR:
+              type: INTEGER
+              description: "Run Hours for Water Pump 1"
+              address: 40514
+            EVAP_COND_WT_PMP_2RUN_HR:
+              type: INTEGER
+              description: "Run Hours for Water Pump 2"
+              address: 40516
+            EVAP_COND_WT_PMP_3RUN_HR:
+              type: INTEGER
+              description: "Run Hours for Water Pump 3"
+              address: 40518
+        maintenance:
+          read:
+            COND1_MAINTENANCE_MODE:
+              type: DIGITAL
+              description: "Maintenance Mode for Condenser 1"
+              address: 40286
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+            COND2_MAINTENANCE_MODE:
+              type: DIGITAL
+              description: "Maintenance Mode for Condenser 2"
+              address: 40286
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+            COND3_MAINTENANCE_MODE:
+              type: DIGITAL
+              description: "Maintenance Mode for Condenser 3"
+              address: 40286
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+            COND1_SLAVE_STATUS:
+              type: INTEGER
+              description: "Slave Status for Condenser 1"
+              address: 40288
+            COND2_SLAVE_STATUS:
+              type: INTEGER
+              description: "Slave Status for Condenser 2"
+              address: 40290
+            COND3_SLAVE_STATUS:
+              type: INTEGER
+              description: "Slave Status for Condenser 3"
+              address: 40291
+    frozen_rooms:
+      room_1:
+        write:
+          LLSV_AC_UNIT_1_2_FRN_RM_1_CTRL_STS:
+            type: DIGITAL
+            description: "Control LLSV for Frozen Room 1 Unit 1 and 2"
+            address: 42052
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_1_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 1 Unit 1 and 2"
+            address: 42054
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_1_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 1 Unit 1 and 2"
+            address: 42056
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 1"
+            address: 40542
+          FRZN_ROOM1_DFRT_FAN_UNT_OFF_TIM:
+            type: INTEGER
+            description: "Defrost Fan Unit Off Time for Frozen Room 1"
+            address: 40544
+          FRN_RM1_DFRT_FAN_UNT_OFF_ACT_TIM:
+            type: INTEGER
+            description: "Defrost Fan Unit Off Actual Time for Frozen Room 1"
+            address: 40545
+          FRZN_ROOM1_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 1"
+            address: 40550
+          FRZN_ROOM1_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 1"
+            address: 40547
+          FRZN_ROOM1_DFRST_PUMP_ON_TIME:
+            type: INTEGER
+            description: "Defrost Pump On Time for Frozen Room 1"
+            address: 40548
+          FRZN_ROM1_DFRST_LLSV_ON_TIME:
+            type: INTEGER
+            description: "Defrost LLSV On Time for Frozen Room 1"
+            address: 40551
+          FZN_ROOM1_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 1"
+            address: 40543
+          FROZN_ROOM1_TEMP_LOW_SP:
+            type: INTEGER
+            description: "Low Temperature Set Point for Frozen Room 1"
+            address: 40560
+          FROZN_ROOM1_TEMP_HIGH_SP:
+            type: INTEGER
+            description: "High Temperature Set Point for Frozen Room 1"
+            address: 40562
+      room_2:
+        write:
+          LSV_AC_UT_1_2_FRN_RM_2_CTRL_STS:
+            type: DIGITAL
+            description: "Control LSV for Frozen Room 2 Unit 1 and 2"
+            address: 42058
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 2 Unit 1 and 2"
+            address: 42060
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 2 Unit 1 and 2"
+            address: 42062
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM2_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 2"
+            address: 41612
+          FZN_ROOM2_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 2"
+            address: 41613
+          FRZN_ROOM2_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 2"
+            address: 41616
+          FRZN_ROOM2_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 2"
+            address: 41617
+      
+      room_3:
+        write:
+          LSV_AC_UT_1_2_FRN_RM_3_CTRL_STS:
+            type: DIGITAL
+            description: "Control LSV for Frozen Room 3 Unit 1 and 2"
+            address: 42064
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 3 Unit 1 and 2"
+            address: 42066
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 3 Unit 1 and 2"
+            address: 42068
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM3_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 3"
+            address: 41626
+          FZN_ROOM3_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 3"
+            address: 41627
+          FRZN_ROOM3_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 3"
+            address: 41633
+          FRZN_ROOM3_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 3"
+            address: 41634
+
+      room_4:
+        write:
+          LSV_AC_UT_1_2_FRN_RM_4_CTRL_STS:
+            type: DIGITAL
+            description: "Control LSV for Frozen Room 4 Unit 1 and 2"
+            address: 42071
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 4 Unit 1 and 2"
+            address: 42070
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 4 Unit 1 and 2"
+            address: 42072
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM4_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 4"
+            address: 41642
+          FZN_ROOM4_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 4"
+            address: 41643
+          FRZN_ROOM4_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 4"
+            address: 41646
+          FRZN_ROOM4_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 4"
+            address: 41647
+
+      room_5:
+        write:
+          LSV_AC_UT_1_2_FRN_RM_5_CTRL_STS:
+            type: DIGITAL
+            description: "Control LSV for Frozen Room 5 Unit 1 and 2"
+            address: 42074
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 5 Unit 1 and 2"
+            address: 42076
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 5 Unit 1 and 2"
+            address: 42078
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 5"
+            address: 41658
+          FZN_ROOM5_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 5"
+            address: 41659
+          FRZN_ROOM5_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 5"
+            address: 41662
+          FRZN_ROOM5_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 5"
+            address: 41663
+
+      room_6:
+        write:
+          LSV_AC_UT_1_2_FRN_RM_6_CTRL_STS:
+            type: DIGITAL
+            description: "Control LSV for Frozen Room 6 Unit 1 and 2"
+            address: 42080
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          HSV_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+            type: DIGITAL
+            description: "Control HSV for Frozen Room 6 Unit 1 and 2"
+            address: 42082
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          ICLX_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+            type: DIGITAL
+            description: "Control ICLX for Frozen Room 6 Unit 1 and 2"
+            address: 42084
+            bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+        read:
+          FRZN_ROOM6_DFRST_LLSV_CLS_TIME:
+            type: INTEGER
+            description: "Defrost LLSV Close Time for Frozen Room 6"
+            address: 41674
+          FZN_ROOM6_DFST_LLSV_CLS_ACT_TIM:
+            type: INTEGER
+            description: "Defrost LLSV Close Actual Time for Frozen Room 6"
+            address: 41672
+          FRZN_ROOM6_HGSV_ON_TIME:
+            type: INTEGER
+            description: "HGSV On Time for Frozen Room 6"
+            address: 41677
+          FRZN_ROOM6_HGSV_ON_TIME_ACT_TIME:
+            type: INTEGER
+            description: "HGSV On Actual Time for Frozen Room 6"
+            address: 41678
+
