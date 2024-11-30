@@ -100,12 +100,29 @@ class PLCReader:
             # Combine high and low registers into a 32-bit integer
             combined = (high_register << 16) | low_register
 
-            # Convert the 32-bit integer into IEEE-754 floating-point format
-            float_value = struct.unpack('>f', combined.to_bytes(4, byteorder='big'))[0]
+            # Convert to binary representation (32 bits)
+            binary_representation = f"{combined:032b}"
+            logger.debug(f"Binary Representation: {binary_representation}")
+
+            # Extract sign, exponent, and mantissa
+            sign = int(binary_representation[0], 2)
+            exponent = int(binary_representation[1:9], 2) - 127  # Unbias the exponent
+            mantissa_bits = binary_representation[9:]
+
+            # Calculate the mantissa with the implicit leading 1
+            mantissa = 1.0
+            for i, bit in enumerate(mantissa_bits):
+                mantissa += int(bit) * (2 ** -(i + 1))
+
+            # Compute the floating-point value
+            float_value = (-1) ** sign * (2 ** exponent) * mantissa
+
+            logger.debug(f"Computed Float Value: {float_value}")
             return float_value
         except Exception as e:
             logger.error(f"Error converting registers {high_register}, {low_register} to float: {e}")
             return None
+
 
     def read_plc(self, plc, client, data_points, parent_key=""):
         """
@@ -154,19 +171,45 @@ class PLCReader:
                     else:
                         logger.warning(f"Failed to read integer '{point_name}' ({address}) from {plc['name']}")
                 
-                elif data_type == "FLOAT":
+                elif data_type == "REAL":
                     # Read floating-point value (2 registers)
                     response = client.read_holding_registers(register_address, 2)
                     if response and not response.isError():
-                        high_register, low_register = response.registers
-                        value = self.convert_to_float(high_register, low_register)
-                        plc_data[point_name] = {
-                            "description": description,
-                            "type": data_type,
-                            "value": value
-                        }
+                        try:
+                            high_register, low_register = response.registers
+                            raw_value = self.convert_to_float(high_register, low_register)
+
+                            # Fetch scaling details from the point_details
+                            raw_zero_scale = point_details.get("raw_zero_scale")
+                            raw_full_scale = point_details.get("raw_full_scale")
+                            eng_zero_scale = point_details.get("eng_zero_scale")
+                            eng_full_scale = point_details.get("eng_full_scale")
+
+                            # Perform scaling if the scales are provided
+                            if all(v is not None for v in [raw_zero_scale, raw_full_scale, eng_zero_scale, eng_full_scale]):
+                                scaled_value = ((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
+                                            (eng_full_scale - eng_zero_scale) + eng_zero_scale
+                            else:
+                                logger.warning(f"Missing scaling parameters for '{point_name}'. Using raw value.")
+                                scaled_value = raw_value
+
+                            # Store the scaled value in the PLC data
+                            plc_data[point_name] = {
+                                "description": description,
+                                "type": data_type,
+                                "raw_value": raw_value,
+                                "scaled_value": scaled_value,
+                                "higher_register": high_register,
+                                "low_register": low_register
+                            }
+
+                            logger.debug(f"Read REAL data point '{point_name}' with raw value: {raw_value}, scaled value: {scaled_value}")
+
+                        except Exception as e:
+                            logger.error(f"Error processing REAL data point '{point_name}': {e}")
                     else:
-                        logger.warning(f"Failed to read float '{point_name}' ({address}) from {plc['name']}")
+                        logger.warning(f"Failed to read real '{point_name}' ({address}) from {plc['name']}")
+
                 
                 elif data_type == "DIGITAL":
                     # Read digital signal (single register, multiple bits)
