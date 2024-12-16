@@ -83,44 +83,23 @@ class PLCReader:
             logger.error(f"Error initializing clients: {e}")
             raise
 
-    def convert_to_float(self, high_register, low_register):
+    def convert_to_float(self,higher_register, low_register):
         """
-        Converts two consecutive Modbus register values into an IEEE-754 floating-point number.
-
-        :param high_register: The high 16-bit register value.
-        :param low_register: The low 16-bit register value.
-        :return: The floating-point representation of the combined registers, or None if invalid.
+        Converts two consecutive Modbus registers into an IEEE-754 32-bit floating-point number.
+        
+        :param higher_register: High 16-bit register value.
+        :param low_register: Low 16-bit register value.
+        :return: Floating-point value represented by the combined registers.
         """
         try:
-            # Validate register values
-            if not (0 <= high_register <= 65535 and 0 <= low_register <= 65535):
-                logger.warning(f"Invalid register values: high={high_register}, low={low_register}")
-                return None
-
             # Combine high and low registers into a 32-bit integer
-            combined = (high_register << 16) | low_register
-
-            # Convert to binary representation (32 bits)
-            binary_representation = f"{combined:032b}"
-            logger.debug(f"Binary Representation: {binary_representation}")
-
-            # Extract sign, exponent, and mantissa
-            sign = int(binary_representation[0], 2)
-            exponent = int(binary_representation[1:9], 2) - 127  # Unbias the exponent
-            mantissa_bits = binary_representation[9:]
-
-            # Calculate the mantissa with the implicit leading 1
-            mantissa = 1.0
-            for i, bit in enumerate(mantissa_bits):
-                mantissa += int(bit) * (2 ** -(i + 1))
-
-            # Compute the floating-point value
-            float_value = (-1) ** sign * (2 ** exponent) * mantissa
-
-            logger.debug(f"Computed Float Value: {float_value}")
+            combined = (higher_register << 16) | low_register
+            
+            # Convert to IEEE-754 float
+            float_value = struct.unpack('>f', struct.pack('>I', combined))[0]
             return float_value
         except Exception as e:
-            logger.error(f"Error converting registers {high_register}, {low_register} to float: {e}")
+            print(f"Error converting to float: {e}")
             return None
 
 
@@ -169,7 +148,7 @@ class PLCReader:
                             "value": value
                         }
                     else:
-                        logger.warning(f"Failed to read integer '{point_name}' ({address}) from {plc['name']}")
+                        logger.debug(f"Failed to read integer '{point_name}' ({address}) from {plc['name']}")
                 
                 elif data_type == "REAL":
                     # Read floating-point value (2 registers)
@@ -190,7 +169,7 @@ class PLCReader:
                                 scaled_value = ((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
                                             (eng_full_scale - eng_zero_scale) + eng_zero_scale
                             else:
-                                logger.warning(f"Missing scaling parameters for '{point_name}'. Using raw value.")
+                                logger.debug(f"Missing scaling parameters for '{point_name}'. Using raw value.")
                                 scaled_value = raw_value
 
                             # Store the scaled value in the PLC data
@@ -295,7 +274,7 @@ class PLCReader:
                         logger.error(f"No client found for device '{device['name']}'. Skipping...")
                         continue
 
-                    logger.info(f"Reading data points for {section} '{device['name']}' at {device['ip']}...")
+                    logger.debug(f"Reading data points for {section} '{device['name']}' at {device['ip']}...")
                     device_data = self.read_plc(device, client, data_points.get(section, {}))
                     section_data[device["name"]] = device_data
 
@@ -316,6 +295,106 @@ class PLCReader:
             logger.error(f"Unexpected error while processing configuration or data points file: {e}")
             return None
 
+    def read_single_register(self, plc_name, client, register_details):
+        """
+        Reads data from a single register based on the provided details.
+
+        :param plc_name: Name of the PLC to read from.
+        :param client: ModbusTcpClient instance connected to the PLC.
+        :param register_details: Dictionary containing details about the register (address, type, scaling, etc.).
+        :return: Dictionary containing the register value and metadata, or None if an error occurs.
+        """
+        try:
+            # Extract required details
+            address = register_details.get("address")
+            data_type = register_details.get("type")
+            description = register_details.get("description")
+            raw_zero_scale = register_details.get("raw_zero_scale")
+            raw_full_scale = register_details.get("raw_full_scale")
+            eng_zero_scale = register_details.get("eng_zero_scale")
+            eng_full_scale = register_details.get("eng_full_scale")
+
+            if not address or not data_type:
+                logger.error(f"Invalid register details: {register_details}")
+                return None
+
+            register_address = address - 40000  # Adjust for pymodbus 0-based indexing
+
+            if data_type == "INTEGER":
+                # Read integer value
+                response = client.read_holding_registers(register_address, 1)
+                if response and not response.isError():
+                    value = response.registers[0]
+                    return {
+                        "description": description,
+                        "type": data_type,
+                        "value": value
+                    }
+                else:
+                    logger.error(f"Failed to read integer register at address {address}.")
+                    return None
+
+            elif data_type == "REAL":
+                # Read floating-point value (2 registers)
+                response = client.read_holding_registers(register_address, 2)
+                if response and not response.isError():
+                    high_register, low_register = response.registers
+                    raw_value = self.convert_to_float(high_register, low_register)
+
+                    # Perform scaling if scaling parameters are provided
+                    if all(v is not None for v in [raw_zero_scale, raw_full_scale, eng_zero_scale, eng_full_scale]):
+                        scaled_value = ((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
+                                    (eng_full_scale - eng_zero_scale) + eng_zero_scale
+                    else:
+                        logger.warning(f"Missing scaling parameters for REAL register at address {address}. Using raw value.")
+                        scaled_value = raw_value
+
+                    return {
+                        "description": description,
+                        "type": data_type,
+                        "raw_value": raw_value,
+                        "scaled_value": scaled_value,
+                        "higher_register": high_register,
+                        "low_register": low_register
+                    }
+                else:
+                    logger.error(f"Failed to read REAL register at address {address}.")
+                    return None
+
+            elif data_type == "DIGITAL":
+                # Read digital value (single register, multiple bits)
+                response = client.read_holding_registers(register_address, 1)
+                if response and not response.isError():
+                    register_value = response.registers[0]
+                    bits = register_details.get("bits", {})
+                    bit_statuses = {}
+                    for bit_label, bit_description in bits.items():
+                        try:
+                            bit_position = int(bit_label.replace("BIT ", ""))
+                        except ValueError:
+                            logger.warning(f"Invalid bit label '{bit_label}'. Skipping...")
+                            continue
+                        bit_status = bool(register_value & (1 << bit_position))
+                        bit_statuses[bit_label] = {
+                            "description": bit_description,
+                            "value": bit_status
+                        }
+                    return {
+                        "description": description,
+                        "type": data_type,
+                        "value": bit_statuses
+                    }
+                else:
+                    logger.error(f"Failed to read DIGITAL register at address {address}.")
+                    return None
+
+            else:
+                logger.error(f"Unsupported data type '{data_type}' for register at address {address}.")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error reading single register for PLC '{plc_name}': {e}")
+            return None
 
 
 

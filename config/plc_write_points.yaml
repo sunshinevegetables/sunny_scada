@@ -40,7 +40,7 @@ data_points:
         bit: 12
 
   EVAP_COND_3_CTRL_STS:
-    register: 42037
+    register: 42036
     bits:
       - bit_name: START
         bit: 0
@@ -82,7 +82,7 @@ data_points:
         bit: 9
 
   COMP_2_WR:
-    register: 41340
+    register: 41361
     bits:
       - bit_name: START
         bit: 0

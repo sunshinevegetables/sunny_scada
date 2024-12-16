@@ -237,12 +237,11 @@ async def lifespan(app: FastAPI):
     # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
     # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
     # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
-    #threads.append(threading.Thread(target=update_screw_compressor_data, daemon=True))
-    #threads.append(threading.Thread(target=update_condenser_data, daemon=True))
-    #threads.append(threading.Thread(target=update_viltor_compressor_data, daemon=True))
-    main_plc_thread = threading.Thread(target=update_plc_data, daemon=True)
-    
-    threads.append(main_plc_thread)
+    # threads.append(threading.Thread(target=update_screw_compressor_data, daemon=True))
+    # threads.append(threading.Thread(target=update_condenser_data, daemon=True))
+    # threads.append(threading.Thread(target=update_viltor_compressor_data, daemon=True))
+    # threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
+    threads.append(threading.Thread(target=update_plc_data, daemon=True))
     
    
     # Start all enabled threads
@@ -354,7 +353,7 @@ def write_signal(request: WriteSignalRequest):
         elif request.plc_type == "viltor_comp":
             write_points_path = "config/viltor_comp_write_points.yaml"
         elif request.plc_type =="plc":
-            write_points_path = "config/plc_write_points.yaml"
+            write_points_path = "config/data_points.yaml"
         else:
             raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
 
@@ -496,57 +495,108 @@ def monitor_screw_comp_suction_pressure():
     """
     Monitors the suction pressure for all screw compressors defined in the configuration.
 
-    - Loads the config file.
-    - Fetches data from the shared storage.
-    - Loops through each screw compressor in the configuration.
-    - Logs a warning if the suction pressure exceeds 45.
+    - Uses a flag to ensure actions for starting/stopping the compressor and condenser are performed only once.
     """
+    flags = {}  # A dictionary to maintain flags for each compressor
+
     while not stop_events["monitor_screw_suction_pressure"].is_set():
         try:
             logger.info("Starting suction pressure monitoring...")
 
-            # Load the screw compressor configuration
-            config_file = "config/config.yaml"
-            screw_comps = plc_reader.load_config(config_file)
+            # Fetch data from storage
+            storage_data = storage.get_data()
+            logger.debug(f"Storage Data: {storage_data}")
 
+            # Extract data for "Main PLC"
+            main_plc_data = storage_data.get("Main PLC", {}).get("data", {})
+            screw_comps = main_plc_data.get("comp", {}).get("screw", {})
             if not screw_comps:
-                logger.error(f"No screw compressors found in configuration file: {config_file}")
-                return
+                logger.warning("No screw compressors data found in storage. Skipping...")
+                time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
+                continue
 
-            for screw_comp in screw_comps:
-                plc_name = screw_comp.get("name")
-                if not plc_name:
-                    logger.warning("Skipping a screw compressor with no name in the configuration.")
-                    continue
+            for comp_name, comp_data in screw_comps.items():
+                logger.info(f"Processing suction pressure for {comp_name}...")
 
-                # Fetch data from storage
-                data = storage.get_data().get(plc_name, {})
-                logger.info(f"Data: {data}")
-                if not data:
-                    logger.warning(f"No data available for {plc_name}. Skipping...")
-                    continue
+                # Safely access the suction pressure
+                suction_pressure_data = (
+                    comp_data.get("read", {}).get("COMP_1_SUC_PRESSURE", {})
+                )
+                suction_pressure = suction_pressure_data.get("scaled_value")
 
-                # Access nested data for SUCTION PRESSURE
-                nested_data = data.get("data", {})
-                suction_pressure = nested_data.get("SUCTION PRESSURE")/100
                 if suction_pressure is None:
-                    logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
+                    logger.warning(
+                        f"Suction pressure data not available for {comp_name}. Skipping..."
+                    )
                     continue
 
-                # Check if suction pressure exceeds the threshold
-                if suction_pressure > 36:
-                    logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
-                    # Play alarm sound
-                    #playsound('static/alarm.wav')
-                    play_alarm()
-                else:
-                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
+                logger.info(f"Suction pressure for {comp_name}: {suction_pressure}")
+
+                # Initialize the flag for the compressor if not already set
+                if comp_name not in flags:
+                    flags[comp_name] = False  # False means the compressor is not running
+
+                # Control logic based on suction pressure and the flag state
+                if suction_pressure >= 50 and not flags[comp_name]:
+                    logger.warning(
+                        f"High suction pressure detected for {comp_name}: {suction_pressure} >= 50. Starting condenser, compressor, and loading compressor."
+                    )
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 42022, 0, 1
+                    )  # Start condenser
+                    time.sleep(0.1)  # Short delay for bit toggling
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 42022, 0, 0
+                    )  # Toggle off
+
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 0, 1
+                    )  # Start compressor
+                    time.sleep(0.1)  # Short delay for bit toggling
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 0, 0
+                    )  # Toggle off
+
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 3, 1
+                    )  # Load compressor
+
+                    flags[comp_name] = True  # Set the flag indicating the compressor is running
+
+                elif suction_pressure <= 35 and flags[comp_name]:
+                    logger.warning(
+                        f"Low suction pressure detected for {comp_name}: {suction_pressure} <= 35. Unloading compressor, stopping compressor, and stopping condenser."
+                    )
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 4, 1
+                    )  # Unload compressor
+
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 1, 1
+                    )  # Stop compressor
+                    time.sleep(0.1)  # Short delay for bit toggling
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 41336, 1, 0
+                    )  # Toggle off
+
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 42022, 0, 1
+                    )  # Stop condenser
+                    time.sleep(0.1)  # Short delay for bit toggling
+                    screw_comp_writer.bit_write_signal(
+                        "Main PLC", 42022, 0, 0
+                    )  # Toggle off
+
+                    flags[comp_name] = False  # Reset the flag indicating the compressor is stopped
 
             # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 20)))
+            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
 
         except Exception as e:
             logger.error(f"Error during suction pressure monitoring: {e}")
+
+
+
 
 def monitor_viltor_comp_suction_pressure():
     """

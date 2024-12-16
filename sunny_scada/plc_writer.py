@@ -12,30 +12,54 @@ class PLCWriter:
         """
         Initialize PLCWriter with a configuration type to load the relevant YAML configuration.
 
-        :param config_type: The type of configuration ('comps', 'vfd', etc.)
+        :param config_type: The type of configuration ('comps', 'vfd', etc., or 'plc' for global configuration)
         """
         try:
-            # Load the write signals from the respective YAML file
-            write_points_path = os.path.join("config", f"{config_type}_write_points.yaml")
-            if not os.path.exists(write_points_path):
-                raise FileNotFoundError(f"Write points file not found: {write_points_path}")
+            if config_type == "plc":
+                # Load the unified data points from data_points.yaml
+                data_points_path = os.path.join("config", "data_points.yaml")
+                if not os.path.exists(data_points_path):
+                    raise FileNotFoundError(f"Data points file not found: {data_points_path}")
 
-            with open(write_points_path, "r") as file:
-                self.write_signals = yaml.safe_load(file).get("data_points", {})
-            
-            if not self.write_signals:
-                raise ValueError(f"No data points found in {write_points_path}")
+                with open(data_points_path, "r") as file:
+                    self.write_signals = yaml.safe_load(file).get("data_points", {})
 
-            # Load PLC configurations dynamically
-            config_path = os.path.join("config", f"{config_type}_config.yaml")
-            if not os.path.exists(config_path):
-                raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
+                if not self.write_signals:
+                    raise ValueError(f"No data points found in {data_points_path}")
 
-            with open(config_path, "r") as file:
-                plc_config = yaml.safe_load(file).get(config_type, [])
+                # Load PLC configurations from the global config.yaml
+                config_path = os.path.join("config", "config.yaml")
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
 
-            if not plc_config:
-                raise ValueError(f"No PLC configurations found in {config_path}")
+                with open(config_path, "r") as file:
+                    plc_config = yaml.safe_load(file).get("plcs", [])
+
+                if not plc_config:
+                    raise ValueError(f"No PLC configurations found in {config_path}")
+
+            else:
+                # Load the write signals from the respective YAML file for the specific config_type
+                write_points_path = os.path.join("config", f"{config_type}_write_points.yaml")
+                if not os.path.exists(write_points_path):
+                    raise FileNotFoundError(f"Write points file not found: {write_points_path}")
+
+                with open(write_points_path, "r") as file:
+                    self.write_signals = yaml.safe_load(file).get("data_points", {})
+                
+                if not self.write_signals:
+                    raise ValueError(f"No data points found in {write_points_path}")
+
+                # Load PLC configurations dynamically for the specific config_type
+                config_path = os.path.join("config", f"{config_type}_config.yaml")
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
+
+                with open(config_path, "r") as file:
+                    plc_config = yaml.safe_load(file).get(config_type, [])
+
+                if not plc_config:
+                    raise ValueError(f"No PLC configurations found in {config_path}")
 
             # Initialize Modbus clients for each PLC
             self.clients = {
@@ -51,6 +75,7 @@ class PLCWriter:
             logger.error(f"Error initializing PLCWriter: {e}")
             raise
 
+ 
     def write_signal(self, plc_name, signal_name, value):
         """
         Write a value to a specific signal on the PLC.
@@ -73,7 +98,7 @@ class PLCWriter:
             logger.error(f"Signal '{signal_name}' not found in write mapping.")
             return False
 
-        modbus_address = self.write_signals[signal_name] - 40001  # Adjust for pymodbus 0-based offset
+        modbus_address = self.write_signals[signal_name] - 40000  # Adjust for pymodbus 0-based offset
 
         client = self.clients[plc_name]
         try:
@@ -93,7 +118,7 @@ class PLCWriter:
                     logger.error(f"Register write failed for {signal_name} at address {modbus_address}")
                     return False
                 else:
-                    logger.info(f"Successfully wrote {value} to {signal_name} as register.")
+                    logger.info(f"Successfully wrote {value} to {signal_name} as register at address {modbus_address}.")
             else:
                 logger.info(f"Successfully wrote {value} to {signal_name} as coil.")
             return True
@@ -215,7 +240,7 @@ class PLCWriter:
             logger.info(f"Modified value of register {register_address}: {new_value}")
 
             # Write the modified value back to the register
-            write_response = client.write_register(register_address - 40001, new_value)
+            write_response = client.write_register(register_address - 40000, new_value)
             if write_response.isError():
                 logger.error(f"Failed to write modified value {new_value} to register {register_address}.")
                 return False
@@ -256,7 +281,7 @@ class PLCWriter:
 
         # Get the register address and bit position from the write_signals mapping
         write_info = self.write_signals[signal_name]
-        register_address = write_info.get("register") - 40001  # Adjust for pymodbus 0-based indexing
+        register_address = write_info.get("register") - 40000  # Adjust for pymodbus 0-based indexing
         bit_position = write_info.get("bit")
 
         # Determine if this is a bitwise operation or a direct register write

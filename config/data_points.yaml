@@ -1,6 +1,140 @@
 data_points:
   plcs:
     comp:
+      viltor:
+        comp_1:
+          write:
+            COMP_1_WR:
+              type: DIGITAL
+              description: "Write on Compressor 1"
+              address: 41360
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "SV1"
+                BIT 4: "SV2"
+                BIT 5: "SV3"
+                BIT 6: "SV4"
+                
+          read:
+            VILTER_1_SUC_PRESSURE:
+              type: REAL
+              description: "Suction Pressure"
+              address: 43006
+            VILTER_1_DIS_PRESSURE:
+              type: REAL
+              description: "Discharge Pressure"
+              address: 43008
+            VILTER_1_OIL_PRESSURE:
+              type: REAL
+              description: "Oil Pressure"
+              address: 43010
+            VILTER_1_CURRENT:
+              type: REAL
+              description: "Current"
+              address: 43012
+            VILTER_1_CAPACITY_CONTROL:
+              type: REAL
+              description: "Capacity Control"
+              address: 43014
+            VILTER_1_RUNNING_HOURS:
+              type: REAL
+              description: "Running Hours"
+              address: 43016
+            VILTER_1_IP:
+              type: REAL
+              description: "Internal Pressure"
+              address: 43042
+
+        comp_2:
+          write:
+            COMP_2_WR:
+              type: DIGITAL
+              description: "Write on Compressor 2"
+              address: 41361
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "SV1"
+                BIT 4: "SV2"
+                BIT 5: "SV3"
+                BIT 6: "SV4"
+          read:
+            VILTER_2_SUC_PRESSURE:
+              type: REAL
+              description: "Suction Pressure"
+              address: 43018
+            VILTER_2_DIS_PRESSURE:
+              type: REAL
+              description: "Discharge Pressure"
+              address: 43020
+            VILTER_2_OIL_PRESSURE:
+              type: REAL
+              description: "Oil Pressure"
+              address: 43022
+            VILTER_2_CURRENT:
+              type: REAL
+              description: "Current"
+              address: 43024
+            VILTER_2_CAPACITY_CONTROL:
+              type: REAL
+              description: "Capacity Control"
+              address: 43026
+            VILTER_2_RUNNING_HOURS:
+              type: REAL
+              description: "Running Hours"
+              address: 43028
+            VILTER_2_IP:
+              type: REAL
+              description: "Internal Pressure"
+              address: 43044
+
+        comp_3:
+          write:
+            COMP_3_WR:
+              type: DIGITAL
+              description: "Write on Compressor 3"
+              address: 41362
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 3: "SV1"
+                BIT 4: "SV2"
+                BIT 5: "SV3"
+                BIT 6: "SV4"
+          read:
+            VILTER_3_SUC_PRESSURE:
+              type: REAL
+              description: "Suction Pressure"
+              address: 43030
+            VILTER_3_DIS_PRESSURE:
+              type: REAL
+              description: "Discharge Pressure"
+              address: 43032
+            VILTER_3_OIL_PRESSURE:
+              type: REAL
+              description: "Oil Pressure"
+              address: 43034
+            VILTER_3_CURRENT:
+              type: REAL
+              description: "Current"
+              address: 43036
+            VILTER_3_CAPACITY_CONTROL:
+              type: REAL
+              description: "Capacity Control"
+              address: 43038
+            VILTER_3_RUNNING_HOURS:
+              type: REAL
+              description: "Running Hours"
+              address: 43040
+            VILTER_3_IP:
+              type: REAL
+              description: "Internal Pressure"
+              address: 43046
+
       screw:
         comp_1:
           write:
@@ -20,76 +154,52 @@ data_points:
                 BIT 9: "PUMP AUTO"
             COMP_1_WR_MODE:
               type: INTEGER
-              description: "Write mode for Compressor 1 from remote"
+              description: "Write mode from remote"
               address: 41337
           read:
             COMP_1_SUC_PRESSURE:
               type: REAL
-              description: "Suction Pressure of Compressor 1"
+              description: "Suction Pressure"
               address: 41226
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_DISC_PRESSURE:
               type: REAL
-              description: "Discharge Pressure of Compressor 1"
+              description: "Discharge Pressure "
               address: 41208
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_OIL_PRESSURE_AFT_PMP:
               type: REAL
-              description: "Oil Pressure After Pump for Compressor 1"
+              description: "Oil Pressure After Pump"
               address: 41216
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_OIL_PRESSURE_AFT_FLT:
               type: REAL
-              description: "Oil Pressure After Filter for Compressor 1"
+              description: "Oil Pressure After Filter"
               address: 41214
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_DELTA_FP:
               type: REAL
-              description: "Delta Filter Pressure for Compressor 1"
+              description: "Delta Filter Pressure"
               address: 41202
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_DELTA_OP:
               type: REAL
-              description: "Delta Oil Pressure for Compressor 1"
+              description: "Delta Oil Pressure"
               address: 41204
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_DELTA_P:
               type: REAL
-              description: "Delta Pressure for Compressor 1"
+              description: "Delta Pressure"
               address: 41206
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_CAPACITY_CONTROL:
               type: REAL
-              description: "Capacity Control for Compressor 1"
+              description: "Capacity Control"
               address: 41200
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_OPD:
               type: REAL
-              description: "Oil Pressure Differential for Compressor 1"
+              description: "Oil Pressure Differential"
               address: 41220
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -97,7 +207,7 @@ data_points:
               eng_full_scale: 150
             COMP_1_SV_POSITON:
               type: REAL
-              description: "SV Position for Compressor 1"
+              description: "SV Position"
               address: 41230
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -105,7 +215,7 @@ data_points:
               eng_full_scale: 150
             COMP_1_MOTOR_CURRENT:
               type: REAL
-              description: "Motor Current for Compressor 1"
+              description: "Motor Current"
               address: 41212
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -113,20 +223,20 @@ data_points:
               eng_full_scale: 150
             COMP_1_RUNNING_HOURS:
               type: REAL
-              description: "Running Hours for Compressor 1"
+              description: "Running Hours"
               address: 41222
               
             COMP_1_STATUS_1:
               type: INTEGER
-              description: "Compressor 1 Status Register 1"
+              description: "Status Register 1"
               address: 41338
             COMP_1_STATUS_2:
               type: INTEGER
-              description: "Compressor 1 Status Register 2"
+              description: "Status Register 2"
               address: 41339
             COMP_1_SUCTION_TEMP:
               type: REAL
-              description: "Suction Temperature of Compressor 1"
+              description: "Suction Temperature"
               address: 41228
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -134,7 +244,7 @@ data_points:
               eng_full_scale: 150
             COMP_1_DISCHARGE_TEMP:
               type: REAL
-              description: "Discharge Temperature of Compressor 1"
+              description: "Discharge Temperature"
               address: 41210
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -142,7 +252,7 @@ data_points:
               eng_full_scale: 150
             COMP_1_OIL_TEMP:
               type: REAL
-              description: "Oil Temperature of Compressor 1"
+              description: "Oil Temperature"
               address: 41218
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -150,7 +260,7 @@ data_points:
               eng_full_scale: 150
             COMP_1_SEPERATOR_TEMP:
               type: REAL
-              description: "Separator Temperature of Compressor 1"
+              description: "Separator Temperature"
               address: 41224
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -158,7 +268,7 @@ data_points:
               eng_full_scale: 150
             INLT_TMP_THO_SYPN_COLR_COMP1OT:
               type: REAL
-              description: "Inlet Temperature Thermocouple for Compressor 1 Output"
+              description: "Inlet Temperature Thermocouple Output"
               address: 40110
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -166,7 +276,7 @@ data_points:
               eng_full_scale: 150
             OUTLT_TMP_THO_SYPN_COLR_COMP1OT:
               type: REAL
-              description: "Outlet Temperature Thermocouple for Compressor 1 Output"
+              description: "Outlet Temperature Thermocouple Output"
               address: 40112
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -190,12 +300,12 @@ data_points:
                 BIT 9: "PUMP AUTO"
             COMP_2_WR_MODE:
               type: INTEGER
-              description: "Write mode for Compressor 2"
+              description: "Write mode"
               address: 41341
           read:
             COMP_2_SUC_PRESSURE:
               type: REAL
-              description: "Suction Pressure of Compressor 2"
+              description: "Suction Pressure"
               address: 41258
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -203,7 +313,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_DISC_PRESSURE:
               type: REAL
-              description: "Discharge Pressure of Compressor 2"
+              description: "Discharge Pressure"
               address: 41240
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -211,7 +321,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_OIL_PRESSURE_AFT_PMP:
               type: REAL
-              description: "Oil Pressure After Pump for Compressor 2"
+              description: "Oil Pressure After Pump"
               address: 41248
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -219,7 +329,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_OIL_PRESSURE_AFT_FLT:
               type: REAL
-              description: "Oil Pressure After Filter for Compressor 2"
+              description: "Oil Pressure After Filter"
               address: 41246
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -227,7 +337,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_DELTA_FP:
               type: REAL
-              description: "Delta Filter Pressure for Compressor 2"
+              description: "Delta Filter Pressure"
               address: 41234
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -235,7 +345,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_DELTA_OP:
               type: REAL
-              description: "Delta Oil Pressure for Compressor 2"
+              description: "Delta Oil Pressure"
               address: 41236
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -243,7 +353,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_DELTA_P:
               type: REAL
-              description: "Delta Pressure for Compressor 2"
+              description: "Delta Pressure"
               address: 41238
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -251,7 +361,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_CAPACITY_CONTROL:
               type: REAL
-              description: "Capacity Control for Compressor 2"
+              description: "Capacity Control"
               address: 41232
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -259,7 +369,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_OPD:
               type: REAL
-              description: "Oil Pressure Differential for Compressor 2"
+              description: "Oil Pressure Differential"
               address: 41252
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -267,7 +377,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_SV_POSITON:
               type: REAL
-              description: "SV Position for Compressor 2"
+              description: "SV Position"
               address: 41262
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -275,7 +385,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_MOTOR_CURRENT:
               type: REAL
-              description: "Motor Current for Compressor 2"
+              description: "Motor Current"
               address: 41244
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -283,20 +393,20 @@ data_points:
               eng_full_scale: 150
             COMP_2_RUNNING_HOURS:
               type: REAL
-              description: "Running Hours for Compressor 2"
+              description: "Running Hours"
               address: 41254
               
             COMP_2_STATUS_1:
               type: INTEGER
-              description: "Compressor 2 Status Register 1"
+              description: "Status Register 1"
               address: 41342
             COMP_2_STATUS_2:
               type: INTEGER
-              description: "Compressor 2 Status Register 2"
+              description: "Status Register 2"
               address: 41343
             COMP_2_SUCTION_TEMP:
               type: REAL
-              description: "Suction Temperature of Compressor 2"
+              description: "Suction Temperature"
               address: 41260
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -304,7 +414,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_DISCHARGE_TEMP:
               type: REAL
-              description: "Discharge Temperature of Compressor 2"
+              description: "Discharge Temperature"
               address: 41242
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -312,7 +422,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_OIL_TEMP:
               type: REAL
-              description: "Oil Temperature of Compressor 2"
+              description: "Oil Temperature"
               address: 41250
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -320,7 +430,7 @@ data_points:
               eng_full_scale: 150
             COMP_2_SEPERATOR_TEMP:
               type: REAL
-              description: "Separator Temperature of Compressor 2"
+              description: "Separator Temperature"
               address: 41256
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -328,7 +438,7 @@ data_points:
               eng_full_scale: 150
             INLT_TMP_THRMO_SYPN_COLR_COMP2OT:
               type: REAL
-              description: "Inlet Temperature Thermocouple for Compressor 2 Output"
+              description: "Inlet Temperature Thermocouple Output"
               address: 40114
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -352,12 +462,12 @@ data_points:
                 BIT 9: "PUMP AUTO"
             COMP_3_WR_MODE:
               type: INTEGER
-              description: "Write mode for Compressor 3"
+              description: "Write mode"
               address: 41345
           read:
             COMP_3_SUC_PRESSURE:
               type: REAL
-              description: "Suction Pressure of Compressor 3"
+              description: "Suction Pressure"
               address: 41264
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -365,7 +475,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_DISC_PRESSURE:
               type: REAL
-              description: "Discharge Pressure of Compressor 3"
+              description: "Discharge Pressure"
               address: 41266
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -373,7 +483,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_OIL_PRESSURE_AFT_PMP:
               type: REAL
-              description: "Oil Pressure After Pump for Compressor 3"
+              description: "Oil Pressure After Pump"
               address: 41268
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -381,7 +491,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_OIL_PRESSURE_AFT_FLT:
               type: REAL
-              description: "Oil Pressure After Filter for Compressor 3"
+              description: "Oil Pressure After Filter"
               address: 41270
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -389,7 +499,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_DELTA_FP:
               type: REAL
-              description: "Delta Filter Pressure for Compressor 3"
+              description: "Delta Filter Pressure"
               address: 41272
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -397,7 +507,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_DELTA_OP:
               type: REAL
-              description: "Delta Oil Pressure for Compressor 3"
+              description: "Delta Oil Pressure"
               address: 41274
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -405,7 +515,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_DELTA_P:
               type: REAL
-              description: "Delta Pressure for Compressor 3"
+              description: "Delta Pressure"
               address: 41276
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -413,7 +523,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_CAPACITY_CONTROL:
               type: REAL
-              description: "Capacity Control for Compressor 3"
+              description: "Capacity Control"
               address: 41286
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -421,7 +531,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_OPD:
               type: REAL
-              description: "Oil Pressure Differential for Compressor 3"
+              description: "Oil Pressure Differential"
               address: 41288
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -429,7 +539,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_SV_POSITON:
               type: REAL
-              description: "SV Position for Compressor 3"
+              description: "SV Position"
               address: 41290
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -437,7 +547,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_MOTOR_CURRENT:
               type: REAL
-              description: "Motor Current for Compressor 3"
+              description: "Motor Current"
               address: 41292
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -445,25 +555,25 @@ data_points:
               eng_full_scale: 150
             COMP_3_RUNNING_HOURS:
               type: REAL
-              description: "Running Hours for Compressor 3"
+              description: "Running Hours"
               address: 41294
               
 
             COMP_3_STATUS_1:
               type: INTEGER
-              description: "Compressor 3 Status Register 1"
+              description: "Status Register 1"
               address: 41346
             COMP_3_STATUS_2:
               type: INTEGER
-              description: "Compressor 3 Status Register 2"
+              description: "Status Register 2"
               address: 41347
             COMP_3_SUCTION_TEMP:
               type: INTEGER
-              description: "Suction Temperature of Compressor 3"
+              description: "Suction Temperature"
               address: 41278
             COMP_3_DISCHARGE_TEMP:
               type: REAL
-              description: "Discharge Temperature of Compressor 3"
+              description: "Discharge Temperature"
               address: 41280
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -471,7 +581,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_OIL_TEMP:
               type: REAL
-              description: "Oil Temperature of Compressor 3"
+              description: "Oil Temperature"
               address: 41282
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -479,7 +589,7 @@ data_points:
               eng_full_scale: 150
             COMP_3_SEPERATOR_TEMP:
               type: REAL
-              description: "Separator Temperature of Compressor 3"
+              description: "Separator Temperature"
               address: 41284
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -487,7 +597,7 @@ data_points:
               eng_full_scale: 150
             OUTLT_TMP_THO_SYPN_COLR_COMP3OT:
               type: REAL
-              description: "Outlet Temperature Thermocouple for Compressor 3 Output"
+              description: "Outlet Temperature Thermocouple Output"
               address: 40116
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -511,12 +621,12 @@ data_points:
                 BIT 9: "PUMP AUTO"
             COMP_4_WR_MODE:
               type: INTEGER
-              description: "Write mode for Compressor 4"
+              description: "Write mode"
               address: 41349
           read:
             COMP_4_SUC_PRESSURE:
               type: REAL
-              description: "Suction Pressure of Compressor 4"
+              description: "Suction Pressure"
               address: 41296
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -524,7 +634,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_DISC_PRESSURE:
               type: REAL
-              description: "Discharge Pressure of Compressor 4"
+              description: "Discharge Pressure"
               address: 41298
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -532,7 +642,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_OIL_PRESSURE_AFT_PMP:
               type: REAL
-              description: "Oil Pressure After Pump for Compressor 4"
+              description: "Oil Pressure After Pump"
               address: 41300
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -540,7 +650,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_OIL_PRESSURE_AFT_FLT:
               type: REAL
-              description: "Oil Pressure After Filter for Compressor 4"
+              description: "Oil Pressure After Filter"
               address: 41326
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -548,7 +658,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_DELTA_FP:
               type: REAL
-              description: "Delta Filter Pressure for Compressor 4"
+              description: "Delta Filter Pressure"
               address: 41302
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -556,7 +666,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_DELTA_OP:
               type: REAL
-              description: "Delta Oil Pressure for Compressor 4"
+              description: "Delta Oil Pressure"
               address: 41304
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -564,7 +674,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_DELTA_P:
               type: REAL
-              description: "Delta Pressure for Compressor 4"
+              description: "Delta Pressure"
               address: 41306
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -572,7 +682,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_CAPACITY_CONTROL:
               type: REAL
-              description: "Capacity Control for Compressor 4"
+              description: "Capacity Control"
               address: 41316
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -580,7 +690,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_OPD:
               type: REAL
-              description: "Oil Pressure Differential for Compressor 4"
+              description: "Oil Pressure Differential"
               address: 41318
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -588,7 +698,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_SV_POSITON:
               type: REAL
-              description: "SV Position for Compressor 4"
+              description: "SV Position"
               address: 41320
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -596,7 +706,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_MOTOR_CURRENT:
               type: REAL
-              description: "Motor Current for Compressor 4"
+              description: "Motor Current"
               address: 41322
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -604,21 +714,21 @@ data_points:
               eng_full_scale: 150
             COMP_4_RUNNING_HOURS:
               type: REAL
-              description: "Running Hours for Compressor 4"
+              description: "Running Hours"
               address: 41324
               
             
             COMP_4_STATUS_1:
               type: INTEGER
-              description: "Compressor 4 Status Register 1"
+              description: "Status Register 1"
               address: 41350
             COMP_4_STATUS_2:
               type: INTEGER
-              description: "Compressor 4 Status Register 2"
+              description: "Status Register 2"
               address: 41351
             COMP_4_SUCTION_TEMP:
               type: REAL
-              description: "Suction Temperature of Compressor 4"
+              description: "Suction Temperature"
               address: 41308
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -626,7 +736,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_DISCHARGE_TEMP:
               type: REAL
-              description: "Discharge Temperature of Compressor 4"
+              description: "Discharge Temperature"
               address: 41310
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -634,7 +744,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_OIL_TEMP:
               type: REAL
-              description: "Oil Temperature of Compressor 4"
+              description: "Oil Temperature"
               address: 41312
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -642,7 +752,7 @@ data_points:
               eng_full_scale: 150
             COMP_4_SEPERATOR_TEMP:
               type: REAL
-              description: "Separator Temperature of Compressor 4"
+              description: "Separator Temperature"
               address: 41314
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -650,7 +760,7 @@ data_points:
               eng_full_scale: 150
             OUTLT_TMP_THO_SYPN_COLR_COMP4OT:
               type: REAL
-              description: "Outlet Temperature Thermocouple for Compressor 4 Output"
+              description: "Outlet Temperature Thermocouple Output"
               address: 40118
               raw_zero_scale: -50
               raw_full_scale: 150
@@ -658,7 +768,7 @@ data_points:
               eng_full_scale: 150
             COMP4_1_MASTER_FROM_SCADA:
               type: DIGITAL
-              description: "Master Selection for Compressor 4 Subcomponent 1"
+              description: "Master Selection Subcomponent 1"
               address: 40340
               bits:
                 BIT 0: "START"
@@ -689,7 +799,7 @@ data_points:
                 BIT 12: "FAIL TO START"
             EVAP_COND_1_CTRL_STS2:
               type: DIGITAL
-              description: "Secondary Control for Evaporative Condenser 1"
+              description: "Secondary Control"
               address: 42040
               bits:
                 
@@ -701,20 +811,20 @@ data_points:
           read:
             EVAP_COND_1_RUN_HR:
               type: REAL
-              description: "Running Hours for Evaporative Condenser 1"
+              description: "Running Hours"
               address: 43048
               
             EVAP_COND_PRESSURE_OUT:
               type: INTEGER
-              description: "Pressure Output for Evaporative Condenser 1"
+              description: "Pressure Output"
               address: 40424
             EVAP_COND_SP_SLV1:
               type: INTEGER
-              description: "Set Point Slave 1 for Evaporative Condenser 1"
+              description: "Set Point Slave 1"
               address: 40444
             EVAP_COND_DEDBND_SLV_1:
               type: INTEGER
-              description: "Deadband Slave 1 for Evaporative Condenser 1"
+              description: "Deadband Slave 1"
               address: 40448
         evap_cond_2:
           write:
@@ -733,7 +843,7 @@ data_points:
                 BIT 12: "FAIL TO START"
             EVAP_COND_2_CTRL_STS2:
               type: DIGITAL
-              description: "Secondary Control for Evaporative Condenser 2"
+              description: "Secondary Control"
               address: 42041
               bits:  
                 BIT 1: "FAN 1 ON FB"
@@ -743,23 +853,23 @@ data_points:
           read:
             EVAP_COND_2_RUN_HR:
               type: REAL
-              description: "Running Hours for Evaporative Condenser 2"
+              description: "Running Hours"
               address: 43050
             EVAP_COND_SP_SLV2:
               type: INTEGER
-              description: "Set Point Slave 2 for Evaporative Condenser 2"
+              description: "Set Point Slave 2"
               address: 40450
             EVAP_COND_DEDBND_SLV_2:
               type: INTEGER
-              description: "Deadband Slave 2 for Evaporative Condenser 2"
+              description: "Deadband Slave 2"
               address: 40454
             EVAP_COND_PRESSURE_MIN:
               type: INTEGER
-              description: "Minimum Pressure for Evaporative Condenser 2"
+              description: "Minimum Pressure"
               address: 40428
             EVAP_COND_PRESSURE_MAX:
               type: INTEGER
-              description: "Maximum Pressure for Evaporative Condenser 2"
+              description: "Maximum Pressure"
               address: 40430
         evap_cond_3:
           write:
@@ -778,7 +888,7 @@ data_points:
                 BIT 12: "FAIL TO START"
             EVAP_COND_3_CTRL_STS2:
               type: DIGITAL
-              description: "Secondary Control for Evaporative Condenser 3"
+              description: "Secondary Control"
               address: 42042
               bits:
                 BIT 1: "FAN 1 ON FB"
@@ -788,23 +898,23 @@ data_points:
           read:
             EVAP_COND_3_RUN_HR:
               type: REAL
-              description: "Running Hours for Evaporative Condenser 3"
+              description: "Running Hours"
               address: 43052
             EVAP_COND_STT_TIME_SLV1:
               type: INTEGER
-              description: "Start Time Slave 1 for Evaporative Condenser 3"
+              description: "Start Time Slave 1"
               address: 40456
             EVAP_COND_STT_TIME_ACT_SLV1:
               type: INTEGER
-              description: "Actual Start Time Slave 1 for Evaporative Condenser 3"
+              description: "Actual Start Time Slave 1"
               address: 40458
             EVAP_COND_STP_TIME_SLV1:
               type: INTEGER
-              description: "Stop Time Slave 1 for Evaporative Condenser 3"
+              description: "Stop Time Slave 1"
               address: 40460
             EVAP_COND_STP_TIME_ACT_SLV1:
               type: INTEGER
-              description: "Actual Stop Time Slave 1 for Evaporative Condenser 3"
+              description: "Actual Stop Time Slave 1"
               address: 40462
         wt_pumps:
           write:
@@ -905,23 +1015,22 @@ data_points:
         acu_unit_1:
           write:
             FRO_STORE1_ACU_1_CTRL_STS:
-              type: DIGITAL
-              description: "Control Status for Frozen Room 1 AC Unit 1"
+              type: INTEGER
+              description: "Control Status AC Unit 1"
               address: 42000
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             
             LLSV_AC_UNIT_1_2_FRN_RM_1_CTRL_STS:
               type: DIGITAL
-              description: "Control LLSV for Frozen Room 1 Unit 1 and 2"
+              description: "Control LLSV Unit 1 and 2"
               address: 42052
               bits:
                   BIT 0: "START"
@@ -934,7 +1043,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_1_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 1 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42054
               bits:
                   BIT 0: "START"
@@ -947,7 +1056,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_1_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 1 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42056
               bits:
                   BIT 0: "START"
@@ -966,60 +1075,59 @@ data_points:
            
             FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 1"
+              description: "Defrost LLSV Close Time"
               address: 40542
             FRZN_ROOM1_DFRT_FAN_UNT_OFF_TIM:
               type: INTEGER
-              description: "Defrost Fan Unit Off Time for Frozen Room 1"
+              description: "Defrost Fan Unit Off Time"
               address: 40544
             FRN_RM1_DFRT_FAN_UNT_OFF_ACT_TIM:
               type: INTEGER
-              description: "Defrost Fan Unit Off Actual Time for Frozen Room 1"
+              description: "Defrost Fan Unit Off Actual Time"
               address: 40545
             FRZN_ROOM1_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 1"
+              description: "HGSV On Time"
               address: 40550
             FRZN_ROOM1_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 1"
+              description: "HGSV On Actual Time"
               address: 40547
             FRZN_ROOM1_DFRST_PUMP_ON_TIME:
               type: INTEGER
-              description: "Defrost Pump On Time for Frozen Room 1"
+              description: "Defrost Pump On Time"
               address: 40548
             FRZN_ROM1_DFRST_LLSV_ON_TIME:
               type: INTEGER
-              description: "Defrost LLSV On Time for Frozen Room 1"
+              description: "Defrost LLSV On Time"
               address: 40551
             FZN_ROOM1_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 1"
+              description: "Defrost LLSV Close Actual Time"
               address: 40543
             FROZN_ROOM1_TEMP_LOW_SP:
               type: INTEGER
-              description: "Low Temperature Set Point for Frozen Room 1"
+              description: "Low Temperature Set Point"
               address: 40560
             FROZN_ROOM1_TEMP_HIGH_SP:
               type: INTEGER
-              description: "High Temperature Set Point for Frozen Room 1"
+              description: "High Temperature Set Point"
               address: 40562
               acu_unit_1:
         acu_unit_2:  
           write:
             FRO_STORE1_ACU_2_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 1 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42004
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             
           read:
@@ -1030,65 +1138,64 @@ data_points:
               address: 43056
             FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 1"
+              description: "Defrost LLSV Close Time"
               address: 40542
             FRZN_ROOM1_DFRT_FAN_UNT_OFF_TIM:
               type: INTEGER
-              description: "Defrost Fan Unit Off Time for Frozen Room 1"
+              description: "Defrost Fan Unit Off Time"
               address: 40544
             FRN_RM1_DFRT_FAN_UNT_OFF_ACT_TIM:
               type: INTEGER
-              description: "Defrost Fan Unit Off Actual Time for Frozen Room 1"
+              description: "Defrost Fan Unit Off Actual Time"
               address: 40545
             FRZN_ROOM1_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 1"
+              description: "HGSV On Time"
               address: 40550
             FRZN_ROOM1_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 1"
+              description: "HGSV On Actual Time"
               address: 40547
             FRZN_ROOM1_DFRST_PUMP_ON_TIME:
               type: INTEGER
-              description: "Defrost Pump On Time for Frozen Room 1"
+              description: "Defrost Pump On Time"
               address: 40548
             FRZN_ROM1_DFRST_LLSV_ON_TIME:
               type: INTEGER
-              description: "Defrost LLSV On Time for Frozen Room 1"
+              description: "Defrost LLSV On Time"
               address: 40551
             FZN_ROOM1_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 1"
+              description: "Defrost LLSV Close Actual Time"
               address: 40543
             FROZN_ROOM1_TEMP_LOW_SP:
               type: INTEGER
-              description: "Low Temperature Set Point for Frozen Room 1"
+              description: "Low Temperature Set Point"
               address: 40560
             FROZN_ROOM1_TEMP_HIGH_SP:
               type: INTEGER
-              description: "High Temperature Set Point for Frozen Room 1"
+              description: "High Temperature Set Point"
               address: 40562
       room_2:
         acu_unit_1:
           write:
             FRO_STORE2_ACU_1_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 2 AC Unit 1"
+              description: "Control Status AC Unit 1"
               address: 42005
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             
             LSV_AC_UT_1_2_FRN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 2 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42058
               bits:
                   BIT 0: "START"
@@ -1101,7 +1208,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 2 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42060
               bits:
                   BIT 0: "START"
@@ -1114,7 +1221,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 2 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42062
               bits:
                   BIT 0: "START"
@@ -1138,40 +1245,40 @@ data_points:
               
             FRZN_ROOM2_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 2"
+              description: "Defrost LLSV Close Time"
               address: 41612
             FZN_ROOM2_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 2"
+              description: "Defrost LLSV Close Actual Time"
               address: 41613
             FRZN_ROOM2_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 2"
+              description: "HGSV On Time"
               address: 41616
             FRZN_ROOM2_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 2"
+              description: "HGSV On Actual Time"
               address: 41617
         acu_unit_2:
           write:
             
             FRO_STORE2_ACU_2_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 2 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42006
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
+
             LSV_AC_UT_1_2_FRN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 2 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42058
               bits:
                   BIT 0: "START"
@@ -1184,7 +1291,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 2 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42060
               bits:
                   BIT 0: "START"
@@ -1197,7 +1304,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_2_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 2 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42062
               bits:
                   BIT 0: "START"
@@ -1221,19 +1328,19 @@ data_points:
               
             FRZN_ROOM2_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 2"
+              description: "Defrost LLSV Close Time"
               address: 41612
             FZN_ROOM2_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 2"
+              description: "Defrost LLSV Close Actual Time"
               address: 41613
             FRZN_ROOM2_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 2"
+              description: "HGSV On Time"
               address: 41616
             FRZN_ROOM2_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 2"
+              description: "HGSV On Actual Time"
               address: 41617
       
       room_3:
@@ -1241,22 +1348,21 @@ data_points:
           write:
             FRO_STORE3_ACU_1_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 3 AC Unit 1"
+              description: "Control Status AC Unit 1"
               address: 42007
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             
             LSV_AC_UT_1_2_FRN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 3 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42064
               bits:
                   BIT 0: "START"
@@ -1269,7 +1375,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 3 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42066
               bits:
                   BIT 0: "START"
@@ -1282,7 +1388,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 3 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42068
               bits:
                   BIT 0: "START"
@@ -1306,40 +1412,40 @@ data_points:
             
             FRZN_ROOM3_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 3"
+              description: "Defrost LLSV Close Time"
               address: 41626
             FZN_ROOM3_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 3"
+              description: "Defrost LLSV Close Actual Time"
               address: 41627
             FRZN_ROOM3_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 3"
+              description: "HGSV On Time"
               address: 41633
             FRZN_ROOM3_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 3"
+              description: "HGSV On Actual Time"
               address: 41634
         acu_unit_2:
           write:
             
             FRO_STORE3_ACU_2_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 3 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42008
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
+
             LSV_AC_UT_1_2_FRN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 3 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42064
               bits:
                   BIT 0: "START"
@@ -1352,7 +1458,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 3 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42066
               bits:
                   BIT 0: "START"
@@ -1365,7 +1471,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_3_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 3 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42068
               bits:
                   BIT 0: "START"
@@ -1389,41 +1495,40 @@ data_points:
             
             FRZN_ROOM3_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 3"
+              description: "Defrost LLSV Close Time"
               address: 41626
             FZN_ROOM3_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 3"
+              description: "Defrost LLSV Close Actual Time"
               address: 41627
             FRZN_ROOM3_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 3"
+              description: "HGSV On Time"
               address: 41633
             FRZN_ROOM3_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 3"
+              description: "HGSV On Actual Time"
               address: 41634
       room_4:
         acu_unit_1:
           write:
             FRO_STORE4_ACU_1_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 4 AC Unit 1"
+              description: "Control Status AC Unit 1"
               address: 42009
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             
             LSV_AC_UT_1_2_FRN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 4 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42071
               bits:
                   BIT 0: "START"
@@ -1436,7 +1541,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 4 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42070
               bits:
                   BIT 0: "START"
@@ -1449,7 +1554,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 4 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42072
               bits:
                   BIT 0: "START"
@@ -1470,40 +1575,39 @@ data_points:
               
             FRZN_ROOM4_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 4"
+              description: "Defrost LLSV Close Time"
               address: 41642
             FZN_ROOM4_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 4"
+              description: "Defrost LLSV Close Actual Time"
               address: 41643
             FRZN_ROOM4_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 4"
+              description: "HGSV On Time"
               address: 41646
             FRZN_ROOM4_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 4"
+              description: "HGSV On Actual Time"
               address: 41647
         acu_unit_2:
           write:
             
             FRO_STORE4_ACU_2_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 4 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42010
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
             LSV_AC_UT_1_2_FRN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 4 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42071
               bits:
                   BIT 0: "START"
@@ -1516,7 +1620,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 4 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42070
               bits:
                   BIT 0: "START"
@@ -1529,7 +1633,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_4_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 4 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42072
               bits:
                   BIT 0: "START"
@@ -1550,48 +1654,40 @@ data_points:
               
             FRZN_ROOM4_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 4"
+              description: "Defrost LLSV Close Time"
               address: 41642
             FZN_ROOM4_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 4"
+              description: "Defrost LLSV Close Actual Time"
               address: 41643
             FRZN_ROOM4_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 4"
+              description: "HGSV On Time"
               address: 41646
             FRZN_ROOM4_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 4"
+              description: "HGSV On Actual Time"
               address: 41647
       room_5:
         acu_unit_1:
           write:
             FRO_STORE5_ACU_1_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 5 AC Unit 1"
+              description: "Control Status AC Unit 1"
               address: 42013
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
-                BIT 3: "UNKNOWN"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 8: "UNKNOWN"
-                BIT 9: "PUMP ON"
-                BIT 10: "UNKNOWN"
-                BIT 11: "UNKNOWN"
-                BIT 12: "UNKNOWN"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
-                BIT 14: "UNKNOWN"
-                BIT 15: "UNKNOWN"
             
             LSV_AC_UT_1_2_FRN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 5 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42074
               bits:
                   BIT 0: "START"
@@ -1604,7 +1700,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 5 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42076
               bits:
                   BIT 0: "START"
@@ -1617,7 +1713,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 5 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42078
               bits:
                   BIT 0: "START"
@@ -1638,40 +1734,40 @@ data_points:
               
             FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 5"
+              description: "Defrost LLSV Close Time"
               address: 41658
             FZN_ROOM5_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 5"
+              description: "Defrost LLSV Close Actual Time"
               address: 41659
             FRZN_ROOM5_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 5"
+              description: "HGSV On Time"
               address: 41662
             FRZN_ROOM5_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 5"
+              description: "HGSV On Actual Time"
               address: 41663
         acu_unit_2:
           write:
             
             FRO_STORE5_ACU_2_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 5 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42014
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
+
             LSV_AC_UT_1_2_FRN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 5 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42074
               bits:
                   BIT 0: "START"
@@ -1684,7 +1780,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 5 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42076
               bits:
                   BIT 0: "START"
@@ -1697,7 +1793,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_5_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 5 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42078
               bits:
                   BIT 0: "START"
@@ -1716,40 +1812,40 @@ data_points:
               address: 43072   
             FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 5"
+              description: "Defrost LLSV Close Time"
               address: 41658
             FZN_ROOM5_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 5"
+              description: "Defrost LLSV Close Actual Time"
               address: 41659
             FRZN_ROOM5_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 5"
+              description: "HGSV On Time"
               address: 41662
             FRZN_ROOM5_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 5"
+              description: "HGSV On Actual Time"
               address: 41663
       room_6:
         acu_unit_1:
           write:
             FRO_STORE6_ACU_1_CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 6 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42014
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
+
             LSV_AC_UT_1_2_FRN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 6 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42080
               bits:
                   BIT 0: "START"
@@ -1762,7 +1858,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 6 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42082
               bits:
                   BIT 0: "START"
@@ -1775,7 +1871,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 6 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42084
               bits:
                   BIT 0: "START"
@@ -1789,43 +1885,43 @@ data_points:
           read:
             AC_UNIT_1_FZN_RM_6_RUN_HR:
               type: REAL
-              description: "Running Hours for Air Conditioning Unit 1 in Frozen Room 6"
+              description: "Running Hours"
               address: 43074
             FRZN_ROOM6_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 6"
+              description: "Defrost LLSV Close Time"
               address: 41674
             FZN_ROOM6_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 6"
+              description: "Defrost LLSV Close Actual Time"
               address: 41672
             FRZN_ROOM6_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 6"
+              description: "HGSV On Time"
               address: 41677
             FRZN_ROOM6_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 6"
+              description: "HGSV On Actual Time"
               address: 41678
         acu_unit_2:
           write:
             FRO_STORE6_ACU_2 _CTRL_STS:
               type: DIGITAL
-              description: "Control Status for Frozen Room 6 AC Unit 2"
+              description: "Control Status AC Unit 2"
               address: 42014
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
                 BIT 2: "AUTO"
                 BIT 4: "RESET"
-                BIT 5: "Fan-1 Run FB"
-                BIT 6: "Fan-1 Trip FB"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
+                BIT 5: "FAN-1 RUN FB"
+                BIT 7: "FAN-2 RUN FB"
+                BIT 12: "FAIL TO START"
                 BIT 13: "MANUAL"
+                
             LSV_AC_UT_1_2_FRN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control LSV for Frozen Room 6 Unit 1 and 2"
+              description: "Control LSV Unit 1 and 2"
               address: 42080
               bits:
                   BIT 0: "START"
@@ -1838,7 +1934,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             HSV_AC_UT_1_2_FZN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control HSV for Frozen Room 6 Unit 1 and 2"
+              description: "Control HSV Unit 1 and 2"
               address: 42082
               bits:
                   BIT 0: "START"
@@ -1851,7 +1947,7 @@ data_points:
                   BIT 12: "FAIL TO START"
             ICLX_AC_UT_1_2_FZN_RM_6_CTRL_STS:
               type: DIGITAL
-              description: "Control ICLX for Frozen Room 6 Unit 1 and 2"
+              description: "Control ICLX Unit 1 and 2"
               address: 42084
               bits:
                   BIT 0: "START"
@@ -1867,22 +1963,22 @@ data_points:
               
             AC_UNIT_2_FZN_RM_6_RUN_HR:
               type: REAL
-              description: "Running Hours for Air Conditioning Unit 2 in Frozen Room 6"
+              description: "Running Hours"
               address: 43076
 
             FRZN_ROOM6_DFRST_LLSV_CLS_TIME:
               type: INTEGER
-              description: "Defrost LLSV Close Time for Frozen Room 6"
+              description: "Defrost LLSV Close Time"
               address: 41674
             FZN_ROOM6_DFST_LLSV_CLS_ACT_TIM:
               type: INTEGER
-              description: "Defrost LLSV Close Actual Time for Frozen Room 6"
+              description: "Defrost LLSV Close Actual Time"
               address: 41672
             FRZN_ROOM6_HGSV_ON_TIME:
               type: INTEGER
-              description: "HGSV On Time for Frozen Room 6"
+              description: "HGSV On Time"
               address: 41677
             FRZN_ROOM6_HGSV_ON_TIME_ACT_TIME:
               type: INTEGER
-              description: "HGSV On Actual Time for Frozen Room 6"
+              description: "HGSV On Actual Time"
               address: 41678
