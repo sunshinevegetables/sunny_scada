@@ -1010,8 +1010,188 @@ data_points:
               type: INTEGER
               description: "Slave Status for Condenser 3"
               address: 40291
+    packhouses:
+      packhouse_2:
+        data:
+          read:
+            PACK_HOUSE_TEMP:
+              type: INTEGER
+              description: "Temperasture"
+              address: 40058
+            PACK_HOUSE_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40238
+            PACK_HOUSE_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40240
+      packing_area:
+        data:
+          read:
+            PACKING_AREA_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40060
+            PACKING_AREA_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40242
+            PACKING_AREA_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40244
+
+    processing:
+      iqf:
+        data:
+          read:
+            IQF_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40068
+            IQF_TEMP:
+              type: REAL
+              description: "Temp MIN"
+              address: 40258
+            IQF_TEMP:
+              type: REAL
+              description: "Temp MAX"
+              address: 40260
+    cold_stores:
+      chamber_i:
+        data:
+          read:
+            COLD_STORE1_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40062
+            COLD_STORE1_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40246
+            COLD_STORE1_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40248
+            RH_COLD_STORE1:
+              type: INTEGER
+              description: "RH"
+              address: 40070
+            RH_COLD_STORE1_MIN:
+              type: REAL
+              description: "RH MIN"
+              address: 40262
+            RH_COLD_STORE1_MAX:
+              type: REAL
+              description: "RH MAX"
+              address: 40264
+            CO2_COLD_STORE1:
+              type: INTEGER
+              description: "CO2"
+              address: 40072
+            CO2_COLD_STORE1_MIN:
+              type: REAL
+              description: "CO2 MIN"
+              address: 40266
+            CO2_COLD_STORE1_MAX:
+              type: REAL
+              description: "CO2 MAX"
+              address: 40268
+      chamber_j:
+        data:
+          read:
+            COLD_STORE2_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40064
+            COLD_STORE2_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40250
+            COLD_STORE2_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40252
+            RH_COLD_STORE2:
+              type: INTEGER
+              description: "RH"
+              address: 40074 
+            RH_COLD_STORE2_MIN:
+              type: REAL
+              description: "RH MIN"
+              address: 40270
+            RH_COLD_STORE2_MAX:
+              type: REAL
+              description: "RH MAX"
+              address: 40272
+            CO2_COLD_STORE2:
+              type: INTEGER
+              description: "CO2"
+              address: 40076
+            CO2_COLD_STORE2_MIN:
+              type: REAL
+              description: "CO2 MIN"
+              address: 40274
+            CO2_COLD_STORE2_MAX:
+              type: REAL
+              description: "CO2 MAX"
+              address: 40276
+      cold_store_ante_room:
+        data:
+          read:
+            ANTE_ROOM_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40066
+            ANTE_ROOM_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40254
+            ANTE_ROOM_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40256  
+            RH_ANTE_ROOM:
+              type: INTEGER
+              description: "RH"
+              address: 40078
+            RH_ANTE_ROOM_MIN:
+              type: REAL
+              description: "RH MIN"
+              address: 40278
+            RH_ANTE_ROOM_MAX:
+              type: REAL
+              description: "RH MAX"
+              address: 40280 
+            CO2_ANTE_ROOM:
+              type: INTEGER
+              description: "CO2"
+              address: 40080
+            CO2_ANTE_ROOM_MIN:
+              type: REAL
+              description: "CO2 MIN"
+              address: 40282
+            CO2_ANTE_ROOM_MAX:
+              type: REAL
+              description: "CO2 MAX"
+              address: 40284
     frozen_rooms:
-      room_1:
+      chamber_p:
+        data:
+          read:
+            FROZN_ROOM1_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40046
+            FROZN_ROOM1_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40212
+            FROZN_ROOM1_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40214     
         acu_unit_1:
           write:
             FRO_STORE1_ACU_1_CTRL_STS:
@@ -1068,11 +1248,11 @@ data_points:
                   BIT 9: "PUMP ON"
                   BIT 12: "FAIL TO START"
           read:
+            
             AC_UNIT_1_FZN_RM_1_RUN_HR:
               type: REAL
               description: "Running Hours for Air Conditioning Unit 1 in Frozen Room 1"
-              address: 43054
-           
+              address: 43054                       
             FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
               type: INTEGER
               description: "Defrost LLSV Close Time"
@@ -1176,7 +1356,21 @@ data_points:
               type: INTEGER
               description: "High Temperature Set Point"
               address: 40562
-      room_2:
+      chamber_q:
+        data:
+          read:
+            FROZN_ROOM2_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40048
+            FROZN_ROOM2_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40216
+            FROZN_ROOM2_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40218
         acu_unit_1:
           write:
             FRO_STORE2_ACU_1_CTRL_STS:
@@ -1233,6 +1427,10 @@ data_points:
                   BIT 9: "PUMP ON"
                   BIT 12: "FAIL TO START"
           read:
+            FROZN_ROOM3_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40050   
             AC_UNIT_1_FZN_RM_2_RUN_HR:
               type: REAL
               description: "Running Hours for Air Conditioning Unit 1 in Frozen Room 2"
@@ -1343,7 +1541,21 @@ data_points:
               description: "HGSV On Actual Time"
               address: 41617
       
-      room_3:
+      chamber_r:
+        data:
+          read:
+            FROZN_ROOM3_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40050
+            FROZN_ROOM3_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40220
+            FROZN_ROOM3_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40222
         acu_unit_1:
           write:
             FRO_STORE3_ACU_1_CTRL_STS:
@@ -1509,7 +1721,21 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41634
-      room_4:
+      chamber_s:
+        data:
+          read:
+            FROZN_ROOM4_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40052
+            FROZN_ROOM4_TEMP_MIN:
+              type: REAL
+              description: "Temperature"
+              address: 40224
+            FROZN_ROOM4_TEMP_MAX:
+              type: REAL
+              description: "Temperature"
+              address: 40226
         acu_unit_1:
           write:
             FRO_STORE4_ACU_1_CTRL_STS:
@@ -1668,7 +1894,21 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41647
-      room_5:
+      chamber_t:
+        data:
+          read:
+            FROZN_ROOM5_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40054
+            FROZN_ROOM5_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40228
+            FROZN_ROOM5_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40230
         acu_unit_1:
           write:
             FRO_STORE5_ACU_1_CTRL_STS:
@@ -1728,10 +1968,7 @@ data_points:
             AC_UNIT_1_FZN_RM_5_RUN_HR:
               type: REAL
               description: "Running Hours for Air Conditioning Unit 1 in Frozen Room 5"
-              address: 43070
-              
-           
-              
+              address: 43070    
             FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
               type: INTEGER
               description: "Defrost LLSV Close Time"
@@ -1826,7 +2063,21 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41663
-      room_6:
+      chamber_u:
+        data:
+          read:
+            FROZN_ROOM6_TEMP:
+              type: INTEGER
+              description: "Temperature"
+              address: 40056
+            FROZN_ROOM6_TEMP_MIN:
+              type: REAL
+              description: "Temp MIN"
+              address: 40232
+            FROZN_ROOM6_TEMP_MAX:
+              type: REAL
+              description: "Temp MAX"
+              address: 40236
         acu_unit_1:
           write:
             FRO_STORE6_ACU_1_CTRL_STS:
@@ -1958,9 +2209,7 @@ data_points:
                   BIT 7: "LOCAL/REMOTE"
                   BIT 9: "PUMP ON"
                   BIT 12: "FAIL TO START"
-          read:
-            
-              
+          read:  
             AC_UNIT_2_FZN_RM_6_RUN_HR:
               type: REAL
               description: "Running Hours"
