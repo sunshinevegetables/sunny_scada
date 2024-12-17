@@ -135,7 +135,7 @@ class PLCReader:
                     logger.warning(f"Invalid data point configuration for '{point_name}'. Skipping...")
                     continue
 
-                register_address = address - 40001  # Adjust for pymodbus 0-based indexing
+                register_address = address - 40001 + 2  # Adjust for pymodbus 0-based indexing
 
                 if data_type == "INTEGER":
                     # Read integer value

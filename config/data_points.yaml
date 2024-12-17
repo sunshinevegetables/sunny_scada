@@ -1050,11 +1050,11 @@ data_points:
               type: INTEGER
               description: "Temperature"
               address: 40068
-            IQF_TEMP:
+            IQF_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
               address: 40258
-            IQF_TEMP:
+            IQF_TEMP_MAX:
               type: REAL
               description: "Temp MAX"
               address: 40260
@@ -1177,13 +1177,13 @@ data_points:
               description: "CO2 MAX"
               address: 40284
     frozen_rooms:
-      chamber_p:
+      chamber_q:
         data:
           read:
             FROZN_ROOM1_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40046
+              address: 40120
             FROZN_ROOM1_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1356,13 +1356,13 @@ data_points:
               type: INTEGER
               description: "High Temperature Set Point"
               address: 40562
-      chamber_q:
+      chamber_r:
         data:
           read:
             FROZN_ROOM2_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40048
+              address: 40122
             FROZN_ROOM2_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1541,13 +1541,13 @@ data_points:
               description: "HGSV On Actual Time"
               address: 41617
       
-      chamber_r:
+      chamber_s:
         data:
           read:
             FROZN_ROOM3_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40050
+              address: 40124
             FROZN_ROOM3_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1721,13 +1721,13 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41634
-      chamber_s:
+      chamber_t:
         data:
           read:
             FROZN_ROOM4_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40052
+              address: 40126
             FROZN_ROOM4_TEMP_MIN:
               type: REAL
               description: "Temperature"
@@ -1894,13 +1894,13 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41647
-      chamber_t:
+      chamber_u:
         data:
           read:
             FROZN_ROOM5_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40054
+              address: 40128
             FROZN_ROOM5_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -2063,13 +2063,13 @@ data_points:
               type: INTEGER
               description: "HGSV On Actual Time"
               address: 41663
-      chamber_u:
+      chamber_V:
         data:
           read:
             FROZN_ROOM6_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40056
+              address: 40130
             FROZN_ROOM6_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
