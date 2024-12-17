@@ -163,15 +163,21 @@ class PLCReader:
                             raw_full_scale = point_details.get("raw_full_scale")
                             eng_zero_scale = point_details.get("eng_zero_scale")
                             eng_full_scale = point_details.get("eng_full_scale")
+                            scale = point_details.get("scale")
 
                             # Perform scaling if the scales are provided
                             if all(v is not None for v in [raw_zero_scale, raw_full_scale, eng_zero_scale, eng_full_scale]):
-                                scaled_value = ((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
-                                            (eng_full_scale - eng_zero_scale) + eng_zero_scale
+                                scaled_value = (((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
+                                            (eng_full_scale - eng_zero_scale) + eng_zero_scale)
                             else:
                                 logger.debug(f"Missing scaling parameters for '{point_name}'. Using raw value.")
                                 scaled_value = raw_value
-
+                            # Apply scale if provided
+                            if scale is not None:
+                                try:
+                                    scaled_value *= float(scale)
+                                except ValueError as e:
+                                    logger.warning(f"Invalid scale '{scale}' for '{point_name}'. Using unscaled value.")
                             # Store the scaled value in the PLC data
                             plc_data[point_name] = {
                                 "description": description,

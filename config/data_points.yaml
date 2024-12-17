@@ -41,7 +41,7 @@ data_points:
             VILTER_1_RUNNING_HOURS:
               type: REAL
               description: "Running Hours"
-              address: 43016
+              address: 43204
             VILTER_1_IP:
               type: REAL
               description: "Internal Pressure"
@@ -85,7 +85,7 @@ data_points:
             VILTER_2_RUNNING_HOURS:
               type: REAL
               description: "Running Hours"
-              address: 43028
+              address: 43206
             VILTER_2_IP:
               type: REAL
               description: "Internal Pressure"
@@ -129,7 +129,7 @@ data_points:
             VILTER_3_RUNNING_HOURS:
               type: REAL
               description: "Running Hours"
-              address: 43040
+              address: 43208
             VILTER_3_IP:
               type: REAL
               description: "Internal Pressure"
@@ -201,26 +201,17 @@ data_points:
               type: REAL
               description: "Oil Pressure Differential"
               address: 41220
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_SV_POSITON:
               type: REAL
               description: "SV Position"
               address: 41230
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_MOTOR_CURRENT:
               type: REAL
               description: "Motor Current"
               address: 41212
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_RUNNING_HOURS:
               type: REAL
               description: "Running Hours"
@@ -238,50 +229,65 @@ data_points:
               type: REAL
               description: "Suction Temperature"
               address: 41228
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_DISCHARGE_TEMP:
               type: REAL
               description: "Discharge Temperature"
               address: 41210
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             COMP_1_OIL_TEMP:
               type: REAL
               description: "Oil Temperature"
               address: 41218
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+             
             COMP_1_SEPERATOR_TEMP:
               type: REAL
               description: "Separator Temperature"
               address: 41224
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             INLT_TMP_THO_SYPN_COLR_COMP1OT:
               type: REAL
               description: "Inlet Temperature Thermocouple Output"
               address: 40110
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+              
             OUTLT_TMP_THO_SYPN_COLR_COMP1OT:
               type: REAL
               description: "Outlet Temperature Thermocouple Output"
               address: 40112
-              raw_zero_scale: -50
-              raw_full_scale: 150
-              eng_zero_scale: -50
-              eng_full_scale: 150
+            COMP_1_CURRENT_VFD:
+              type: REAL
+              description: "Current VFD"
+              address: 43112
+
+            COMP_1_FREQUENCY_VFD:
+              type: REAL
+              description: "Frequency VFD"
+              address: 43120
+
+            COMP_1_KWH_VFD:
+              type: REAL
+              description: "Energy Consumption KWH VFD"
+              address: 43116
+
+            COMP_1_POWER_VFD:
+              type: REAL
+              description: "Power VFD"
+              address: 43114
+
+            COMP_1_RPM_VFD:
+              type: REAL
+              description: "RPM VFD"
+              address: 43118
+
+            COMP_1_VOLTAGE_VFD:
+              type: REAL
+              description: "Voltage VFD"
+              address: 43110
+
+            COMP_1_VI_POSITION:
+              type: REAL
+              description: "VI Position"
+              address: 43210  
         comp_2:
           write:
             COMP_2_WR:
@@ -782,6 +788,47 @@ data_points:
 
     cond:
       evap:
+        data:
+          write:
+            EVAP_COND_WT_PUMP1_CTRL_STS:
+              type: DIGITAL
+              description: "Water Pump Control Status for Condenser 1"
+              address: 42026
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+            EVAP_COND2_WT_PUMP1_CTRL_STS:
+              type: DIGITAL
+              description: "Water Pump Control Status for Condenser 2"
+              address: 42028
+              bits:
+                BIT 0: "START"
+                BIT 1: "STOP"
+                BIT 2: "AUTO/MANUAL"
+                BIT 4: "RESET"
+                BIT 6: "PUMP TRIP"
+                BIT 7: "LOCAL/REMOTE"
+                BIT 9: "PUMP ON"
+                BIT 12: "FAIL TO START"
+          read:
+            LIQD_TEMP_HEADER_EVAP_CONDOUT:
+              type: REAL
+              description: "Liquid Temp"
+              address: 40092
+            LIQD_TEMP_HDR_EVAP_COND_MIN:
+              type: REAL
+              description: "Liquid Temp MIN"
+              address: 40156
+            LIQD_TEMP_HDR_EVAP_COND_MAX:
+              type: REAL
+              description: "Liquid Temp MAX"
+              address: 40158
         evap_cond_1:
           write:
             EVAP_COND_1_CTRL_STS:
@@ -813,17 +860,20 @@ data_points:
               type: REAL
               description: "Running Hours"
               address: 43048
-              
+            EVAP_COND_WT_PMP_1RUN_HR:
+              type: REAL
+              description: "Water Pump Run Hours"
+              address: 40514
             EVAP_COND_PRESSURE_OUT:
-              type: INTEGER
+              type: REAL
               description: "Pressure Output"
               address: 40424
             EVAP_COND_SP_SLV1:
-              type: INTEGER
+              type: REAL
               description: "Set Point Slave 1"
               address: 40444
             EVAP_COND_DEDBND_SLV_1:
-              type: INTEGER
+              type: REAL
               description: "Deadband Slave 1"
               address: 40448
         evap_cond_2:
@@ -855,20 +905,25 @@ data_points:
               type: REAL
               description: "Running Hours"
               address: 43050
+            EVAP_COND_WT_PMP_2RUN_HR:
+              type: REAL
+              description: "Water Pump Run Hours"
+              address: 40516
+            
             EVAP_COND_SP_SLV2:
-              type: INTEGER
+              type: REAL
               description: "Set Point Slave 2"
               address: 40450
             EVAP_COND_DEDBND_SLV_2:
-              type: INTEGER
+              type: REAL
               description: "Deadband Slave 2"
               address: 40454
             EVAP_COND_PRESSURE_MIN:
-              type: INTEGER
+              type: REAL
               description: "Minimum Pressure"
               address: 40428
             EVAP_COND_PRESSURE_MAX:
-              type: INTEGER
+              type: REAL
               description: "Maximum Pressure"
               address: 40430
         evap_cond_3:
@@ -900,6 +955,10 @@ data_points:
               type: REAL
               description: "Running Hours"
               address: 43052
+            EVAP_COND_WT_PMP_3RUN_HR:
+              type: REAL
+              description: "Water Pump Run Hours"
+              address: 40518
             EVAP_COND_STT_TIME_SLV1:
               type: INTEGER
               description: "Start Time Slave 1"
@@ -916,108 +975,36 @@ data_points:
               type: INTEGER
               description: "Actual Stop Time Slave 1"
               address: 40462
-        wt_pumps:
+        chiller:
           write:
-            EVAP_COND_WT_PUMP1_CTRL_STS:
+            CHLD_WT_PMP_1_W_CTRL_STS:
               type: DIGITAL
-              description: "Water Pump Control Status for Condenser 1"
-              address: 42026
+              description: "Chiller"
+              address: 42044
               bits:
                 BIT 0: "START"
                 BIT 1: "STOP"
-                BIT 2: "AUTO/MANUAL"
-                BIT 4: "RESET"
-                BIT 6: "PUMP TRIP"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
-                BIT 12: "FAIL TO START"
-            EVAP_COND2_WT_PUMP1_CTRL_STS:
-              type: DIGITAL
-              description: "Water Pump Control Status for Condenser 2"
-              address: 42028
-              bits:
-                BIT 0: "START"
-                BIT 1: "STOP"
-                BIT 2: "AUTO/MANUAL"
-                BIT 4: "RESET"
-                BIT 6: "PUMP TRIP"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
-                BIT 12: "FAIL TO START"
+                BIT 2: "AUTO"
           read:
-            EVAP_COND_WT_PMP_1RUN_HR:
-              type: INTEGER
-              description: "Run Hours for Water Pump 1"
-              address: 40514
-            EVAP_COND_WT_PMP_2RUN_HR:
-              type: INTEGER
-              description: "Run Hours for Water Pump 2"
-              address: 40516
-            EVAP_COND_WT_PMP_3RUN_HR:
-              type: INTEGER
-              description: "Run Hours for Water Pump 3"
-              address: 40518
-        maintenance:
-          read:
-            COND1_MAINTENANCE_MODE:
+            CHLD_WT_PMP_1_W_CTRL_STS:
               type: DIGITAL
-              description: "Maintenance Mode for Condenser 1"
-              address: 40286
+              description: "Chiller"
+              address: 42044
               bits:
-                BIT 0: "START"
-                BIT 1: "STOP"
-                BIT 2: "AUTO/MANUAL"
-                BIT 4: "RESET"
-                BIT 6: "PUMP TRIP"
+                BIT 5: "PUMP ON"
+                BIT 12: "FAILED TO START"
                 BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
-                BIT 12: "FAIL TO START"
-            COND2_MAINTENANCE_MODE:
-              type: DIGITAL
-              description: "Maintenance Mode for Condenser 2"
-              address: 40286
-              bits:
-                BIT 0: "START"
-                BIT 1: "STOP"
-                BIT 2: "AUTO/MANUAL"
-                BIT 4: "RESET"
                 BIT 6: "PUMP TRIP"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
-                BIT 12: "FAIL TO START"
-            COND3_MAINTENANCE_MODE:
-              type: DIGITAL
-              description: "Maintenance Mode for Condenser 3"
-              address: 40286
-              bits:
-                BIT 0: "START"
-                BIT 1: "STOP"
-                BIT 2: "AUTO/MANUAL"
-                BIT 4: "RESET"
-                BIT 6: "PUMP TRIP"
-                BIT 7: "LOCAL/REMOTE"
-                BIT 9: "PUMP ON"
-                BIT 12: "FAIL TO START"
-            COND1_SLAVE_STATUS:
-              type: INTEGER
-              description: "Slave Status for Condenser 1"
-              address: 40288
-            COND2_SLAVE_STATUS:
-              type: INTEGER
-              description: "Slave Status for Condenser 2"
-              address: 40290
-            COND3_SLAVE_STATUS:
-              type: INTEGER
-              description: "Slave Status for Condenser 3"
-              address: 40291
+            
+        
     packhouses:
       packhouse_2:
         data:
           read:
             PACK_HOUSE_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperasture"
-              address: 40058
+              address: 40132
             PACK_HOUSE_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1030,9 +1017,9 @@ data_points:
         data:
           read:
             PACKING_AREA_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40060
+              address: 40134
             PACKING_AREA_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1063,9 +1050,9 @@ data_points:
         data:
           read:
             COLD_STORE1_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40062
+              address: 40136
             COLD_STORE1_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1087,9 +1074,9 @@ data_points:
               description: "RH MAX"
               address: 40264
             CO2_COLD_STORE1:
-              type: INTEGER
+              type: REAL
               description: "CO2"
-              address: 40072
+              address: 40146
             CO2_COLD_STORE1_MIN:
               type: REAL
               description: "CO2 MIN"
@@ -1102,9 +1089,9 @@ data_points:
         data:
           read:
             COLD_STORE2_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40064
+              address: 40138
             COLD_STORE2_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1126,9 +1113,9 @@ data_points:
               description: "RH MAX"
               address: 40272
             CO2_COLD_STORE2:
-              type: INTEGER
+              type: REAL
               description: "CO2"
-              address: 40076
+              address: 40150
             CO2_COLD_STORE2_MIN:
               type: REAL
               description: "CO2 MIN"
@@ -1141,9 +1128,9 @@ data_points:
         data:
           read:
             ANTE_ROOM_TEMP:
-              type: INTEGER
+              type: REAL
               description: "Temperature"
-              address: 40066
+              address: 40140
             ANTE_ROOM_TEMP_MIN:
               type: REAL
               description: "Temp MIN"
@@ -1165,9 +1152,9 @@ data_points:
               description: "RH MAX"
               address: 40280 
             CO2_ANTE_ROOM:
-              type: INTEGER
+              type: REAL
               description: "CO2"
-              address: 40080
+              address: 40154
             CO2_ANTE_ROOM_MIN:
               type: REAL
               description: "CO2 MIN"
