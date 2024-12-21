@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Data Points</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+        }
+        form {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            background-color: #f9f9f9;
+        }
+        label {
+            font-weight: bold;
+        }
+        input, select, textarea, button {
+            display: block;
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .bit-details {
+            margin-left: 20px;
+            margin-bottom: 10px;
+        }
+        .bit-details input {
+            width: auto;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Add New Data Point</h1>
+    <form id="data-point-form">
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required>
+
+        <label for="type">Type:</label>
+        <select id="type" name="type" required>
+            <option value="">Select Type</option>
+            <option value="REAL">REAL</option>
+            <option value="INTEGER">INTEGER</option>
+            <option value="DIGITAL">DIGITAL</option>
+        </select>
+
+        <label for="description">Description:</label>
+        <textarea id="description" name="description" rows="4" required></textarea>
+
+        <label for="address">Address:</label>
+        <input type="number" id="address" name="address" required>
+
+        <div id="bit-details-container" style="display: none;">
+            <h3>Bit Details (for DIGITAL type)</h3>
+            <div id="bit-details"></div>
+        </div>
+
+        <button type="submit">Add Data Point</button>
+    </form>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const urlParams = new URLSearchParams(window.location.search);
+            const type = urlParams.get('type');
+            const path = urlParams.get('path');
+    
+            if (type && path) {
+                const heading = document.createElement('h2');
+                heading.textContent = `Add New Data Point to ${type.toUpperCase()} (${path})`;
+                document.body.insertBefore(heading, document.body.firstChild);
+                // Append `type` to path
+                document.getElementById('data-point-form').dataset.path = `${path}/${type}`;
+            } else {
+                alert('Invalid context. Please navigate from the data points page.');
+                window.history.back();
+            }
+        });
+    
+        document.getElementById('data-point-form').addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            const newDataPoint = {
+                name: formData.get('name'),
+                type: formData.get('type'),
+                description: formData.get('description'),
+                address: parseInt(formData.get('address')),
+                bits: {},
+            };
+
+            if (newDataPoint.type === 'DIGITAL') {
+                for (let i = 0; i <= 15; i++) {
+                    const bitDescription = formData.get(`bit-${i}`);
+                    if (bitDescription) {
+                        newDataPoint.bits[`BIT ${i}`] = bitDescription;
+                    }
+                }
+            }
+
+            const path = new URLSearchParams(window.location.search).get('path');
+            try {
+                const response = await fetch('http://127.0.0.1:8000/add_data_point', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...newDataPoint, path }),
+                });
+
+                if (response.ok) {
+                    alert('Data Point added successfully!');
+                    window.history.back();
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to add data point: ${JSON.stringify(error)}`);
+                }
+            } catch (err) {
+                console.error('Error adding data point:', err);
+                alert('Error adding data point.');
+            }
+        });
+
+    </script>
+</body>
+</html>

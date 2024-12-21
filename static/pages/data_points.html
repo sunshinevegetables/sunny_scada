@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Points Configuration</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+        }
+        .collapsible {
+            cursor: pointer;
+            padding: 10px;
+            width: 100%;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 18px;
+            background-color: #f1f1f1;
+            margin-bottom: 5px;
+        }
+        .active, .collapsible:hover {
+            background-color: #ccc;
+        }
+        .content {
+            padding-left: 20px;
+            display: none;
+            overflow: hidden;
+            background-color: #f9f9f9;
+            margin-bottom: 10px;
+        }
+        .content div {
+            margin-left: 15px;
+        }
+        .nested-key {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .add-button {
+            margin-left: 10px;
+            color: green;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .add-button:hover {
+            color: darkgreen;
+        }
+    </style>
+</head>
+<body>
+    <h1>Data Points Configuration</h1>
+    <div id="data-container">Loading...</div>
+
+    <script>
+        async function fetchYAML(filePath) {
+            try {
+                const response = await fetch(filePath);
+                const text = await response.text();
+                return jsyaml.load(text);
+            } catch (error) {
+                console.error("Error loading YAML file:", error);
+                document.getElementById("data-container").innerText = "Failed to load data.";
+            }
+        }
+
+        function createCollapsible(key, data, path = "") {
+            const container = document.createElement('div');
+            
+            const button = document.createElement('button');
+            button.className = 'collapsible';
+            button.innerText = key;
+
+            const content = document.createElement('div');
+            content.className = 'content';
+
+            // Check if this is an object (nested structure)
+            if (typeof data === 'object' && data !== null) {
+                const isReadOrWriteLevel = key === 'read' || key === 'write';
+
+                for (const [nestedKey, nestedValue] of Object.entries(data)) {
+                    const newPath = path ? `${path}/${key}` : key;
+
+                    // For individual data points under 'read' or 'write'
+                    if (isReadOrWriteLevel) {
+                        const dataPointPath = `${newPath}/${nestedKey}`;
+
+                        // Add a row for the data point name and edit button
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.alignItems = 'center';
+                        row.style.justifyContent = 'space-between';
+
+                        const dataPointText = document.createElement('div');
+                        dataPointText.innerText = nestedKey;
+
+                        const editButton = document.createElement('span');
+                        editButton.className = 'edit-button';
+                        editButton.innerText = '✏️ Edit';
+                        editButton.title = `Edit ${nestedKey}`;
+                        editButton.style.marginLeft = '10px';
+                        editButton.style.cursor = 'pointer';
+                        editButton.onclick = () => {
+                            const url = new URL('http://127.0.0.1:8000/static/pages/edit_data_point.html');
+                            url.searchParams.append('path', dataPointPath);
+                            window.location.href = url.toString();
+                        };
+
+                        row.appendChild(dataPointText);
+                        row.appendChild(editButton);
+                        content.appendChild(row);
+
+                        // Add properties of the data point (address, description, etc.)
+                        if (typeof nestedValue === 'object' && nestedValue !== null) {
+                            for (const [propKey, propValue] of Object.entries(nestedValue)) {
+                                const propRow = document.createElement('div');
+                                propRow.style.marginLeft = '20px';
+                                propRow.innerText = `${propKey}: ${propValue}`;
+                                content.appendChild(propRow);
+                            }
+                        }
+                    } else {
+                        // Recursively add nested structures
+                        content.appendChild(createCollapsible(nestedKey, nestedValue, newPath));
+                    }
+                }
+
+                // Add "+ Add" button for 'read' or 'write' sections
+                if (key === 'read' || key === 'write') {
+                    const addButton = document.createElement('span');
+                    addButton.className = 'add-button';
+                    addButton.innerText = '+ Add';
+                    addButton.title = `Add to ${key}`;
+                    addButton.style.marginLeft = '10px';
+                    addButton.style.cursor = 'pointer';
+                    addButton.onclick = () => {
+                        const url = new URL('http://127.0.0.1:8000/static/pages/add_data_point.html');
+                        url.searchParams.append('type', key);
+                        url.searchParams.append('path', `${path}/${key}`);
+                        window.location.href = url.toString();
+                    };
+                    button.appendChild(addButton);
+                }
+            } else {
+                // For non-object values, show as a simple text
+                const text = document.createElement('div');
+                text.innerText = `${key}: ${data}`;
+                content.appendChild(text);
+            }
+
+            // Add collapsible behavior
+            button.addEventListener('click', function () {
+                this.classList.toggle('active');
+                const panel = this.nextElementSibling;
+                if (panel.style.display === 'block') {
+                    panel.style.display = 'none';
+                } else {
+                    panel.style.display = 'block';
+                }
+            });
+
+            container.appendChild(button);
+            container.appendChild(content);
+            return container;
+        }
+
+
+
+
+
+
+
+        async function loadDataPoints() {
+            const dataContainer = document.getElementById("data-container");
+            const dataPoints = await fetchYAML("http://127.0.0.1:8000/config/data_points.yaml"); // Path to your YAML file
+
+            if (dataPoints) {
+                dataContainer.innerHTML = ""; // Clear loading text
+                for (const [key, value] of Object.entries(dataPoints)) {
+                    dataContainer.appendChild(createCollapsible(key, value));
+                }
+            }
+        }
+
+        // Load the data points dynamically
+        loadDataPoints();
+    </script>
+</body>
+</html>

@@ -35,16 +35,10 @@ plc_writer = PLCWriter(config_type="plc")
 
 # Define stop events for threads
 stop_events = {
-    "screw": threading.Event(),
-    "viltor": threading.Event(),
-    "vfd": threading.Event(),
-    "condenser": threading.Event(),
-    "compressor": threading.Event(),
-    "hmi": threading.Event(),
+   
     "plc": threading.Event(),
-    "alarms": threading.Event(),
-    "monitor_screw_suction_pressure": threading.Event(),
-    "monitor_viltor_suction_pressure": threading.Event()}
+    "alarms": threading.Event()
+    }
 
 # Define the model for the request body
 class WriteSignalRequest(BaseModel):
@@ -64,51 +58,27 @@ class BitWriteSignalRequest(BaseModel):
 class StartPackhouseRequest(BaseModel):
     plc_name: str
 
+# Path to the data_points.yaml file
+DATA_POINTS_FILE = "config/data_points.yaml"
 
-# Background thread for reading compressor data
-def update_screw_data():
-    while not stop_events["screw"].is_set():
-        try:
-            logger.info("Reading screw compressor data...")
-            plc_reader.read_plcs_from_config(
-                config_file="config/config.yaml",
-                plc_points_file="config/screw_comp_points.yaml",
-                floating_points_file=None,
-                digital_points_file=None
-            )
-            time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
-        except Exception as e:
-            logger.error(f"Error in compressor thread: {e}")
+# Define the model for the request body
+class UpdateDataPointRequest(BaseModel):
+    path: str  # Hierarchical path in the YAML file, e.g., "plcs/comp/viltor/comp_1/read"
+    name: str  # Name of the new data point
+    type: str  # Type of the data point (e.g., REAL, DIGITAL)
+    description: str  # Description of the data point
+    address: int  # Modbus address
+    bits: dict = None  # Only applicable for DIGITAL type data points
 
-# Background thread for reading compressor data
-def update_viltor_data():
-    while not stop_events["viltor"].is_set():
-        try:
-            logger.info("Reading viltor compressor data...")
-            plc_reader.read_plcs_from_config("config/config.yaml", "config/viltor_comp_points.yaml", None, None)
-            time.sleep(int(os.getenv("POLLING_INTERVAL_COMP", 10)))
-        except Exception as e:
-            logger.error(f"Error in compressor thread: {e}")
-
-# Background thread for reading VFD data
-def update_vfd_data():
-    while not stop_events["vfd"].is_set():
-        try:
-            logger.info("Reading VFD data...")
-            plc_reader.read_plcs_from_config("config/vfd_config.yaml", "config/vfd_points.yaml", None, None)
-            time.sleep(int(os.getenv("POLLING_INTERVAL_VFD", 10)))
-        except Exception as e:
-            logger.error(f"Error in VFD thread: {e}")
-
-# Background thread for reading HMI data
-def update_hmi_data():
-    while not stop_events["hmi"].is_set():
-        try:
-            logger.info("Reading HMI data...")
-            plc_reader.read_plcs_from_config("config/hmi_config.yaml", "config/hmi_points.yaml", None, None)
-            time.sleep(int(os.getenv("POLLING_INTERVAL_HMI", 10)))
-        except Exception as e:
-            logger.error(f"Error in HMI thread: {e}")
+# Helper function to update the nested dictionary
+def update_nested_dict(data: dict, path: list, key: str, value: dict):
+    if not path:
+        data[key] = value
+        return
+    current_key = path.pop(0)
+    if current_key not in data:
+        data[current_key] = {}
+    update_nested_dict(data[current_key], path, key, value)
 
 # Background thread for reading PLC data
 def update_plc_data():
@@ -137,93 +107,6 @@ def update_plc_data():
         except Exception as e:
             logger.error(f"Unexpected error in PLC thread: {e}")
 
-# Background thread for reading PLC data
-def update_condenser_data():
-    while not stop_events["condenser"].is_set():
-        try:
-            logger.info("Starting Condenser data read cycle...")
-            
-            # Read data from PLCs
-            all_cond_data = plc_reader.read_plcs_from_config(
-                config_file="config/cond_config.yaml",
-                plc_points_file="config/cond_points.yaml",
-                floating_points_file=None,
-                digital_points_file=None
-            )
-
-            # Log and handle the aggregated data if necessary
-            if all_cond_data:
-                logger.debug(f"Aggregated PLC data: {all_cond_data}")
-            else:
-                logger.warning("No data received during PLC read cycle.")
-
-            # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
-
-        except FileNotFoundError as e:
-            logger.error(f"Configuration or points file not found: {e}")
-            break  # Break the loop if a critical file is missing
-        except Exception as e:
-            logger.error(f"Unexpected error in PLC thread: {e}")
-    
-# Background thread for reading Compressor data
-def update_screw_compressor_data():
-    while not stop_events["compressor"].is_set():
-        try:
-            logger.info("Starting Compressor data read cycle...")
-            
-            # Read data from PLCs
-            all_comp_data = plc_reader.read_plcs_from_config(
-                config_file="config/config.yaml",
-                plc_points_file="config/screw_comp_points.yaml",
-                floating_points_file="config/screw_comp_floating_points.yaml",  # If applicable
-                digital_points_file="config/screw_comp_digital_points.yaml"     # If applicable
-            )
-
-            # Log and handle the aggregated data if necessary
-            if all_comp_data:
-                logger.debug(f"Aggregated Compressor data: {all_comp_data}")
-            else:
-                logger.warning("No data received during PLC read cycle.")
-
-            # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
-
-        except FileNotFoundError as e:
-            logger.error(f"Configuration or points file not found: {e}")
-            break  # Break the loop if a critical file is missing
-        except Exception as e:
-            logger.error(f"Unexpected error in Compressor thread: {e}")
-
-# Background thread for reading Viltor data
-def update_viltor_compressor_data():
-    while not stop_events["viltor"].is_set():
-        try:
-            logger.info("Starting Viltor data read cycle...")
-            
-            # Read data from PLCs
-            all_viltor_data = plc_reader.read_plcs_from_config(
-                config_file="config/config.yaml",
-                plc_points_file="config/viltor_comp_points.yaml",
-                floating_points_file="config/viltor_comp_floating_points.yaml",  # If applicable
-                digital_points_file="config/viltor_comp_digital_points.yaml"     # If applicable
-            )
-
-            # Log and handle the aggregated data if necessary
-            if all_viltor_data:
-                logger.debug(f"Aggregated Viltor data: {all_viltor_data}")
-            else:
-                logger.warning("No data received during PLC read cycle.")
-
-            # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
-
-        except FileNotFoundError as e:
-            logger.error(f"Configuration or points file not found: {e}")
-            break  # Break the loop if a critical file is missing
-        except Exception as e:
-            logger.error(f"Unexpected error in Viltor thread: {e}")
-
 
 # Custom lifespan manager using asynccontextmanager
 @asynccontextmanager
@@ -231,16 +114,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     threads = []
     # Enable specific threads
-    # threads.append(threading.Thread(target=update_screw_data, daemon=True))
-    # threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
-    # threads.append(threading.Thread(target=monitor_viltor_comp_suction_pressure, daemon=True))
-    # threads.append(threading.Thread(target=update_viltor_data, daemon=True))
-    # threads.append(threading.Thread(target=update_vfd_data, daemon=True))
-    # threads.append(threading.Thread(target=update_hmi_data, daemon=True))
-    # threads.append(threading.Thread(target=update_screw_compressor_data, daemon=True))
-    # threads.append(threading.Thread(target=update_condenser_data, daemon=True))
-    # threads.append(threading.Thread(target=update_viltor_compressor_data, daemon=True))
-    # threads.append(threading.Thread(target=monitor_screw_comp_suction_pressure, daemon=True))
+    
     threads.append(threading.Thread(target=update_plc_data, daemon=True))
     
    
@@ -263,6 +137,141 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app with custom lifespan
 app = FastAPI(lifespan=lifespan)
 
+@app.get("/get_data_point", summary="Get Data Point", description="Fetch a specific data point from the data_points.yaml file.")
+def get_data_point(path: str):
+    try:
+        with open(DATA_POINTS_FILE, "r") as file:
+            data_points = yaml.safe_load(file)
+
+        # Navigate through the nested structure using the path
+        keys = path.split("/")
+        data = data_points
+        for key in keys:
+            data = data.get(key, {})
+
+        if not data:
+            raise HTTPException(status_code=404, detail="Data point not found.")
+
+        return data
+
+    except Exception as e:
+        logger.error(f"Error fetching data point: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while fetching the data point.")
+
+@app.post("/update_data_point", summary="Update Data Point", description="Update an existing data point in the YAML file.")
+def update_data_point(request: UpdateDataPointRequest):
+    """
+    API to update an existing data point in the data_points.yaml file.
+
+    :param request: JSON request containing the updated data point details.
+    :return: Success message if the update is successful.
+    """
+    try:
+        # Load the existing data_points.yaml
+        if not os.path.exists(DATA_POINTS_FILE):
+            raise FileNotFoundError(f"Data points file not found at {DATA_POINTS_FILE}")
+
+        with open(DATA_POINTS_FILE, "r") as file:
+            data_points = yaml.safe_load(file)
+
+        if data_points is None:
+            data_points = {}
+
+        # Parse the hierarchical path into a list
+        path_parts = request.path.split("/")
+        name = request.name
+
+        # Navigate to the parent of the data point to update
+        parent = data_points
+        for part in path_parts[:-1]:
+            if part not in parent:
+                raise HTTPException(status_code=404, detail=f"Path '{'/'.join(path_parts[:-1])}' not found in the data points.")
+            parent = parent[part]
+
+        # Check if the data point exists
+        if path_parts[-1] not in parent:
+            raise HTTPException(status_code=404, detail=f"Data point '{path_parts[-1]}' not found at the specified path.")
+
+        # Update the data point with new details
+        updated_data_point = {
+            "type": request.type,
+            "description": request.description,
+            "address": request.address,
+        }
+
+        # Add bits if the type is DIGITAL
+        if request.type == "DIGITAL" and request.bits:
+            updated_data_point["bits"] = request.bits
+
+        # Update the data point in the parent
+        parent[path_parts[-1]] = updated_data_point
+
+        # Save the updated data points back to the YAML file
+        with open(DATA_POINTS_FILE, "w") as file:
+            yaml.dump(data_points, file, default_flow_style=False)
+
+        logger.info(f"Data point '{name}' successfully updated at {request.path}.")
+        return {"message": f"Data point '{name}' updated successfully at {request.path}."}
+
+    except FileNotFoundError as e:
+        logger.error(e)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating data point: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+
+
+@app.post("/add_data_point", summary="Add Data Point", description="Add the data_points.yaml file dynamically.")
+def update_data_point(request: UpdateDataPointRequest):
+    """
+    API to dynamically add the data_points.yaml file.
+
+    :param request: JSON request containing the new data point details.
+    :return: Success message if the add is successful.
+    """
+    try:
+        # Load the existing data_points.yaml
+        if not os.path.exists(DATA_POINTS_FILE):
+            raise FileNotFoundError(f"Data points file not found at {DATA_POINTS_FILE}")
+
+        with open(DATA_POINTS_FILE, "r") as file:
+            data_points = yaml.safe_load(file)
+
+        if data_points is None:
+            data_points = {}
+
+        # Parse the path into a list
+        path_parts = request.path.split("/")
+        name = request.name
+
+        # Create the new data point entry
+        new_data_point = {
+            "type": request.type,
+            "description": request.description,
+            "address": request.address,
+        }
+
+        # Include bits if the type is DIGITAL
+        if request.type == "DIGITAL" and request.bits:
+            new_data_point["bits"] = request.bits
+
+        # Update the nested dictionary
+        update_nested_dict(data_points, path_parts, name, new_data_point)
+
+        # Save the updated data points back to the YAML file
+        with open(DATA_POINTS_FILE, "w") as file:
+            yaml.dump(data_points, file, default_flow_style=False)
+
+        logger.info(f"Data point '{name}' successfully added to {request.path}.")
+        return {"message": f"Data point '{name}' added successfully to {request.path}."}
+
+    except FileNotFoundError as e:
+        logger.error(e)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating data point: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+
 # Mount the static files
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 app.mount("/frontend", StaticFiles(directory="static", html=True), name="frontend")
@@ -281,12 +290,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.route('/api/compressors/screw', methods=['GET'])
-def get_screw_compressors():
-    compressors = [
-        {"name":"Compressor A", "status":"Running"}
-    ]
-    return jsonify(compressors)
 
 @app.get("/plc_data", summary="Get PLC Data", description="Fetch the latest data from all configured PLCs.")
 def get_plc_data():
@@ -602,18 +605,20 @@ def monitor_viltor_comp_suction_pressure():
     """
     Monitors the suction pressure for all Viltor compressors defined in the configuration.
 
-    - Loads the config file.
-    - Fetches data from the shared storage.
-    - Loops through each Viltor compressor in the configuration.
-    - Logs a warning if the suction pressure exceeds 45.
+    - Reads the configuration file to get compressor details.
+    - Fetches real-time data from the shared storage.
+    - Monitors the suction pressure and triggers an alarm if it exceeds 35.
     """
+    SUCTION_PRESSURE_THRESHOLD = 35  # Threshold for suction pressure
+    POLLING_INTERVAL = int(os.getenv("POLLING_INTERVAL_PLC", 60))  # Polling interval in seconds
+
     while not stop_events["monitor_viltor_suction_pressure"].is_set():
         try:
             logger.info("Starting Viltor compressor suction pressure monitoring...")
 
             # Load the Viltor compressor configuration
             config_file = "config/config.yaml"
-            viltor_comps = plc_reader.load_config(config_file)
+            viltor_comps = plc_reader.load_config(config_file).get("viltor_comp", [])
 
             if not viltor_comps:
                 logger.error(f"No Viltor compressors found in configuration file: {config_file}")
@@ -627,30 +632,37 @@ def monitor_viltor_comp_suction_pressure():
 
                 # Fetch data from storage
                 data = storage.get_data().get(plc_name, {})
-                logger.info(f"Data: {data}")
+                logger.debug(f"Fetched data for {plc_name}: {data}")
+
                 if not data:
                     logger.warning(f"No data available for {plc_name}. Skipping...")
                     continue
 
                 # Access nested data for SUCTION PRESSURE
-                nested_data = data.get("data", {})
-                suction_pressure = nested_data.get("SUC MOD")
+                suction_pressure = (
+                    data.get("data", {})
+                    .get("read", {})
+                    .get("VILTER_1_SUC_PRESSURE", {})
+                    .get("scaled_value")
+                )
+
                 if suction_pressure is None:
                     logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
                     continue
+
+                logger.info(f"Suction Pressure for {plc_name}: {suction_pressure}")
+
+                # Check if suction pressure exceeds the threshold
+                if suction_pressure > SUCTION_PRESSURE_THRESHOLD:
+                    logger.warning(
+                        f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > {SUCTION_PRESSURE_THRESHOLD}"
+                    )
+                    play_alarm()  # Trigger the alarm
                 else:
-                    suction_pressure = suction_pressure/100
-                    # Check if suction pressure exceeds the threshold
-                    if suction_pressure > 48:
-                        logger.warning(f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > 45")
-                        # Play alarm sound
-                        #playsound('static/alarm.wav')
-                        play_alarm()
-                    else:
-                        logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
+                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
 
             # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 60)))
+            time.sleep(POLLING_INTERVAL)
 
         except Exception as e:
             logger.error(f"Error during Viltor compressor suction pressure monitoring: {e}")
