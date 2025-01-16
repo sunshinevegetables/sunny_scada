@@ -124,3 +124,22 @@ data_points:
         bit: 7
       - bit_name: PUMP AUTO
         bit: 9
+  AMMONIA_PMP_2_30_CTRL_STS:
+    register: 42034
+    bits:
+      - bit_name: START
+        bit: 0
+      - bit_name: STOP
+        bit: 1
+      - bit_name: AUTO/MANUAL
+        bit: 2
+      - bit_name: RESET
+        bit: 4
+      - bit_name: PUMP TRIP
+        bit: 6
+      - bit_name: LOCAL/REMOTE
+        bit: 7
+      - bit_name: PUMP ON
+        bit: 9
+      - bit_name: FAIL TO START
+        bit: 12

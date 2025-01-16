@@ -379,6 +379,10 @@ data_points:
               raw_full_scale: 150
               raw_zero_scale: -50
               type: REAL
+              process: IQF
+              monitor: 1
+              max: 40
+              min: 0
             COMP_2_SV_POSITON:
               address: 41262
               description: SV Position
@@ -710,6 +714,12 @@ data_points:
               raw_full_scale: 150
               raw_zero_scale: -50
               type: REAL
+              process: IQF
+              monitor: 1
+              max: 0
+              max_audio: iqf_suction_pressure_breach_max
+              min: -10
+              min_audio: iqf_suction_pressure_breach_min
             COMP_4_SV_POSITON:
               address: 41320
               description: SV Position
@@ -903,6 +913,7 @@ data_points:
               type: DIGITAL
         data:
           read:
+            
             LIQD_TEMP_HDR_EVAP_COND_MAX:
               address: 40158
               description: Liquid Temp MAX
@@ -915,6 +926,16 @@ data_points:
               address: 40092
               description: Liquid Temp
               type: REAL
+            OUTLT_TEMP_FALING_FLM_CHILROUT:
+              address: 40108
+              description: Chiller Water Temp
+              type: REAL
+              monitor: 1
+              process: IQF
+              max: 5
+              min: 0
+              max_audio: iqf_chiller_water_temp_breach_max
+              min_audio: iqf_chiller_water_temp_breach_min
           write:
             EVAP_COND2_WT_PUMP1_CTRL_STS:
               address: 42028
@@ -948,6 +969,14 @@ data_points:
               type: REAL
         evap_cond_1:
           read:
+            EVAP_COND_1_CTRL_STS:
+              address: 42022
+              bits:
+                BIT 12: FAIL TO START
+                BIT 6: PUMP TRIP
+                BIT 9: FAN ON
+              description: Control Evaporative Condenser 1
+              type: DIGITAL
             EVAP_COND_1_RUN_HR:
               address: 43048
               description: Running Hours
@@ -974,12 +1003,12 @@ data_points:
               bits:
                 BIT 0: START
                 BIT 1: STOP
-                BIT 12: FAIL TO START
+              
                 BIT 2: AUTO/MANUAL
                 BIT 4: RESET
-                BIT 6: PUMP TRIP
+               
                 BIT 7: LOCAL/REMOTE
-                BIT 9: FAN ON
+                
               description: Control Evaporative Condenser 1
               type: DIGITAL
             EVAP_COND_1_CTRL_STS2:
@@ -993,6 +1022,14 @@ data_points:
               type: DIGITAL
         evap_cond_2:
           read:
+            EVAP_COND_2_CTRL_STS:
+              address: 42023
+              bits:
+                BIT 12: FAIL TO START
+                BIT 6: PUMP TRIP
+                BIT 9: FAN ON
+              description: Control Evaporative Condenser 1
+              type: DIGITAL
             EVAP_COND_2_RUN_HR:
               address: 43050
               description: Running Hours
@@ -1042,6 +1079,14 @@ data_points:
               type: DIGITAL
         evap_cond_3:
           read:
+            EVAP_COND_3_CTRL_STS:
+              address: 42024
+              bits:
+                BIT 12: FAIL TO START
+                BIT 6: PUMP TRIP
+                BIT 9: FAN ON
+              description: Control Evaporative Condenser 1
+              type: DIGITAL
             EVAP_COND_3_RUN_HR:
               address: 43052
               description: Running Hours
@@ -1089,6 +1134,110 @@ data_points:
                 BIT 4: FAN 4 ON FB
               description: Secondary Control
               type: DIGITAL
+    lp_receivers:
+      40_c:
+        ammonia_pump_1:
+          read:
+            LIQUID_AMMONIA_PMP_1_40C_RUN_HR:
+              address: 43078
+              description: Running Hours
+              type: REAL
+            PDC_LIQUID_AMMONIA_PMP_2_40C_FB:
+              address: 40001
+              description: Feedback
+              type: DIGITAL
+              bits:
+                BIT 1: STATUS
+          write:
+            AMMONIA_PMP_1_40_CTRL_STS:
+              address: 42031
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 5: PUMP ON
+              description: Control Status
+              type: DIGITAL
+        ammonia_pump_2:
+          read:
+            LIQUID_AMMONIA_PMP_2_40C_RUN_HR:
+              address: 43072
+              description: Running Hours
+              type: REAL
+          write:
+            AMMONIA_PMP_1_40_CTRL_STS:
+                address: 42030
+                bits:
+                  BIT 0: START
+                  BIT 1: STOP
+                  BIT 12: FAIL TO START
+                  BIT 2: AUTO/MANUAL
+                  BIT 4: RESET
+                  BIT 6: PUMP TRIP
+                  BIT 7: LOCAL/REMOTE
+                  BIT 9: PUMP ON
+                description: Control Status
+                type: DIGITAL    
+      30_c:
+        ammonia_pump_1:
+          read:
+            AMMONIA_PMP_1_30_CTRL_STS:
+              address: 42033
+              bits:
+                BIT 12: FAIL TO START
+                BIT 5: PUMP ON
+                BIT 6: PUMP TRIP 
+              description: Control Status
+              type: DIGITAL
+            LIQUID_AMMONIA_PMP_1_30C_RUN_HR:
+              address: 43082
+              description: Running Hours
+              type: REAL
+            PDC_LIQUID_AMMONIA_PMP_1_30C_FB:
+              address: 40001
+              description: Feedback
+              type: DIGITAL
+              bits:
+                BIT 1: STATUS
+          write:
+            AMMONIA_PMP_1_30_CTRL_STS:
+              address: 42033
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 3: AUTO/MANUAL
+                BIT 4: RESET
+                
+              description: Control Status
+              type: DIGITAL
+        ammonia_pump_2:
+          read:
+            AMMONIA_PMP_2_30_CTRL_STS:
+                address: 42034
+                bits:
+                  BIT 12: FAIL TO START
+                  BIT 5: PUMP ON
+                  BIT 6: PUMP TRIP 
+                description: Control Status
+                type: DIGITAL 
+            LIQUID_AMMONIA_PMP_2_30C_RUN_HR:
+              address: 43084
+              description: Running Hours
+              type: REAL
+          write:
+            AMMONIA_PMP_2_30_CTRL_STS:
+                address: 42034
+                bits:
+                  BIT 0: START
+                  BIT 1: STOP
+                  BIT 3: AUTO/MANUAL
+                  BIT 4: RESET
+                description: Control Status
+                type: DIGITAL                  
     frozen_rooms:
       chamber_V:
         acu_unit_1:

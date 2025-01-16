@@ -131,6 +131,13 @@ class PLCReader:
                 address = point_details.get("address")
                 data_type = point_details.get("type")
                 description = point_details.get("description")
+                monitor = point_details.get("monitor")
+                process = point_details.get("process")
+                max_value = point_details.get("max")
+                min_value = point_details.get("min")
+                max_audio = point_details.get("max_audio")
+                min_audio = point_details.get("min_audio")
+
                 if not address or not data_type:
                     logger.warning(f"Invalid data point configuration for '{point_name}'. Skipping...")
                     continue
@@ -142,14 +149,27 @@ class PLCReader:
                     response = client.read_holding_registers(register_address, 1)
                     if response and not response.isError():
                         value = response.registers[0]
-                        plc_data[point_name] = {
+                        data = {
                             "description": description,
                             "type": data_type,
                             "value": value
                         }
+                        if monitor is not None:
+                            data["monitor"] = monitor
+                        if process is not None:
+                            data["process"] = process
+                        if max_value is not None:
+                            data["max"] = max_value
+                        if min_value is not None:
+                            data["min"] = min_value
+                        if max_audio is not None:
+                            data["max_audio"] = max_audio
+                        if min_audio is not None:
+                            data["min_audio"] = min_audio
+                        plc_data[point_name] = data
                     else:
                         logger.debug(f"Failed to read integer '{point_name}' ({address}) from {plc['name']}")
-                
+
                 elif data_type == "REAL":
                     # Read floating-point value (2 registers)
                     response = client.read_holding_registers(register_address, 2)
@@ -158,28 +178,26 @@ class PLCReader:
                             high_register, low_register = response.registers
                             raw_value = self.convert_to_float(high_register, low_register)
 
-                            # Fetch scaling details from the point_details
                             raw_zero_scale = point_details.get("raw_zero_scale")
                             raw_full_scale = point_details.get("raw_full_scale")
                             eng_zero_scale = point_details.get("eng_zero_scale")
                             eng_full_scale = point_details.get("eng_full_scale")
                             scale = point_details.get("scale")
 
-                            # Perform scaling if the scales are provided
                             if all(v is not None for v in [raw_zero_scale, raw_full_scale, eng_zero_scale, eng_full_scale]):
-                                scaled_value = (((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) * \
-                                            (eng_full_scale - eng_zero_scale) + eng_zero_scale)
+                                scaled_value = (((raw_value - raw_zero_scale) / (raw_full_scale - raw_zero_scale)) *
+                                                (eng_full_scale - eng_zero_scale) + eng_zero_scale)
                             else:
                                 logger.debug(f"Missing scaling parameters for '{point_name}'. Using raw value.")
                                 scaled_value = raw_value
-                            # Apply scale if provided
+
                             if scale is not None:
                                 try:
                                     scaled_value *= float(scale)
-                                except ValueError as e:
+                                except ValueError:
                                     logger.warning(f"Invalid scale '{scale}' for '{point_name}'. Using unscaled value.")
-                            # Store the scaled value in the PLC data
-                            plc_data[point_name] = {
+
+                            data = {
                                 "description": description,
                                 "type": data_type,
                                 "raw_value": raw_value,
@@ -187,6 +205,19 @@ class PLCReader:
                                 "higher_register": high_register,
                                 "low_register": low_register
                             }
+                            if monitor is not None:
+                                data["monitor"] = monitor
+                            if process is not None:
+                                data["process"] = process
+                            if max_value is not None:
+                                data["max"] = max_value
+                            if min_value is not None:
+                                data["min"] = min_value
+                            if max_audio is not None:
+                                data["max_audio"] = max_audio
+                            if min_audio is not None:
+                                data["min_audio"] = min_audio
+                            plc_data[point_name] = data
 
                             logger.debug(f"Read REAL data point '{point_name}' with raw value: {raw_value}, scaled value: {scaled_value}")
 
@@ -195,43 +226,45 @@ class PLCReader:
                     else:
                         logger.warning(f"Failed to read real '{point_name}' ({address}) from {plc['name']}")
 
-                
                 elif data_type == "DIGITAL":
-                    # Read digital signal (single register, multiple bits)
                     response = client.read_holding_registers(register_address, 1)
                     if response and not response.isError():
                         register_value = response.registers[0]
-                        #logger.info(f"Point Details: {point_details}")
-                        
-                        # Parse the bit structure from the YAML
                         bits = point_details.get("bits", {})
-                        #logger.info(f"BITS: {bits}")
-                        
                         bit_statuses = {}
                         for bit_label, bit_description in bits.items():
-                            # Extract bit position from the bit label (e.g., "BIT 0")
                             try:
                                 bit_position = int(bit_label.replace("BIT ", ""))
                             except ValueError:
                                 logger.warning(f"Invalid bit label '{bit_label}' for point '{point_name}'. Skipping...")
                                 continue
-                            
-                            # Evaluate bit status (0 or 1)
+
                             bit_status = bool(register_value & (1 << bit_position))
                             bit_statuses[bit_label] = {
                                 "description": bit_description,
                                 "value": bit_status
                             }
-                        
-                        # Add the parsed digital data to the response
-                        plc_data[point_name] = {
+
+                        data = {
                             "description": description,
                             "type": data_type,
                             "value": bit_statuses
                         }
+                        if monitor is not None:
+                            data["monitor"] = monitor
+                        if process is not None:
+                            data["process"] = process
+                        if max_value is not None:
+                            data["max"] = max_value
+                        if min_value is not None:
+                            data["min"] = min_value
+                        if max_audio is not None:
+                            data["max_audio"] = max_audio
+                        if min_audio is not None:
+                            data["min_audio"] = min_audio
+                        plc_data[point_name] = data
                     else:
                         logger.warning(f"Failed to read digital '{point_name}' ({address}) from {plc['name']}")
-
 
         except Exception as e:
             logger.error(f"Error reading from {plc['name']} at {plc['ip']}: {e}")
@@ -239,6 +272,8 @@ class PLCReader:
             client.close()
 
         return plc_data
+
+
 
 
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
+from gtts import gTTS
 from sunny_scada import plc_reader
 from sunny_scada.plc_reader import PLCReader
 from sunny_scada.plc_writer import PLCWriter
@@ -10,34 +11,43 @@ import threading
 import logging
 import os
 import time
+import pygame
 import yaml
 from playsound import playsound 
-import pygame
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 
+import queue
+
+# Queue to store alarm details
+alarm_queue = queue.Queue()
+
+# Thread to process the alarm queue
+alarm_processor_thread = None
+
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-
 
 # Initialize shared components
 storage = DataStorage()
 plc_reader = PLCReader(storage=storage)
 
 # Initialize shared PLC writer
-screw_comp_writer = PLCWriter(config_type="screw_comp")
-viltor_comp_writer = PLCWriter(config_type="viltor_comp") 
 plc_writer = PLCWriter(config_type="plc")
+
+# Define processes
+processes = ["IQF", "AllRound Packhouse", "Cold Storage", "Frozen Storage"]
 
 # Define stop events for threads
 stop_events = {
    
     "plc": threading.Event(),
-    "alarms": threading.Event()
+    "suction_pressure_map": threading.Event(),
+    "data_monitor_map": threading.Event(),
+    "condenser_control_map": threading.Event()
     }
 
 # Define the model for the request body
@@ -54,12 +64,12 @@ class BitWriteSignalRequest(BaseModel):
     bit: int              # Bit position to write (0-15)
     value: int            # Value to write (0 or 1)
 
-# Define the request model
-class StartPackhouseRequest(BaseModel):
-    plc_name: str
 
 # Path to the data_points.yaml file
 DATA_POINTS_FILE = "config/data_points.yaml"
+
+# Global variable for monitoring thread
+monitoring_thread = None
 
 # Define the model for the request body
 class UpdateDataPointRequest(BaseModel):
@@ -107,6 +117,38 @@ def update_plc_data():
         except Exception as e:
             logger.error(f"Unexpected error in PLC thread: {e}")
 
+suction_pressure_map = {}  # Global dictionary to store suction pressure data
+condenser_control_map = {}  # Global dictionary to store condenser control status data
+data_monitor_map = {}  # Global dictionary to store monitored data points
+def update_suction_pressure_map(interval=1):
+    """
+    Update the suction pressure map at regular intervals.
+    If any suction pressure exceeds 45, print an alarm message.
+    """
+    global suction_pressure_map
+    while not stop_events["suction_pressure_map"].is_set():
+        try:
+            # Fetch updated data from storage
+            if not storage.get_data():
+                logger.warning("No data available in storage. Retrying...")
+                time.sleep(interval)
+                continue
+
+            logger.info("Updating suction pressure map...")
+            suction_pressure_map = map_comps_to_suction_pressure()
+            logger.info(f"Suction Pressure Map: {suction_pressure_map}")
+
+            # Check suction pressure values
+            for comp_name, suction_pressure in suction_pressure_map.items():
+                if suction_pressure > 50:
+                    logger.warning(f"ALARM: Suction pressure for {comp_name} exceeds threshold: {suction_pressure}")
+                    trigger_alarm(comp_name, suction_pressure)
+
+        except Exception as e:
+            logger.error(f"Error updating suction pressure map: {e}")
+
+        time.sleep(interval)
+
 
 # Custom lifespan manager using asynccontextmanager
 @asynccontextmanager
@@ -116,8 +158,9 @@ async def lifespan(app: FastAPI):
     # Enable specific threads
     
     threads.append(threading.Thread(target=update_plc_data, daemon=True))
-    
-   
+    #threads.append(threading.Thread(target=update_suction_pressure_map, args=(5,), daemon=True))
+    #threads.append(threading.Thread(target=update_data_monitor_map, args=(5,), daemon=True))
+    threads.append(threading.Thread(target=update_condenser_control_map, daemon=True))
     # Start all enabled threads
     for thread in threads:
         thread.start()
@@ -136,6 +179,27 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app with custom lifespan
 app = FastAPI(lifespan=lifespan)
+
+# Helper function to load processes from processes.yaml
+def load_processes():
+    config_path = "config/processes.yaml"
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as file:
+                data = yaml.safe_load(file)
+                return data.get("processes", [])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error reading YAML file: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail="Processes configuration file not found.")
+
+# Endpoint to get all configured processes
+@app.get("/processes", summary="Get Configured Processes", description="Fetch the list of all configured processes.")
+async def get_processes():
+    processes = load_processes()
+    if not processes:
+        raise HTTPException(status_code=404, detail="No processes configured.")
+    return {"processes": processes}
 
 @app.get("/get_data_point", summary="Get Data Point", description="Fetch a specific data point from the data_points.yaml file.")
 def get_data_point(path: str):
@@ -290,6 +354,271 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def map_comps_to_suction_pressure():
+    """
+    Maps compressor names to their suction pressure values.
+
+    :return: A dictionary where keys are compressor names and values are suction pressures.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        # Initialize dictionary to store compressor names and suction pressures
+        suction_pressure_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            comp_section = plc_data.get("data", {}).get("comp", {})
+            for comp_type, compressors in comp_section.items():
+                for comp_name, comp_data in compressors.items():
+                    read_data = comp_data.get("read", {})
+                    for key, value in read_data.items():
+                        # Check if the description matches 'Suction Pressure'
+                        if value.get("description", "").lower() == "suction pressure":
+                            suction_pressure = value.get("scaled_value")
+                            # Add to the map if suction pressure is found
+                            if suction_pressure is not None:
+                                full_comp_name = f"{plc_name}_{comp_type}_{comp_name}"
+                                suction_pressure_map[full_comp_name] = suction_pressure
+
+        if not suction_pressure_map:
+            logger.warning("No suction pressure data found for compressors.")
+            return {}
+
+        logger.info("Successfully created suction pressure map.")
+        return suction_pressure_map
+
+    except Exception as e:
+        logger.error(f"Error creating suction pressure map: {e}")
+        return {}
+
+def update_condenser_control_map(interval=1):
+    """
+    Update the condenser control status map at regular intervals.
+    """
+    global condenser_control_map
+    while not stop_events["condenser_control_map"].is_set():
+        try:
+            # Fetch and update the condenser control map
+            logger.info("Updating condenser control map...")
+            condenser_control_map = map_condensers_to_control_status()
+            logger.info(f"Condenser Control Map: {condenser_control_map}")
+
+        except Exception as e:
+            logger.error(f"Error updating condenser control map: {e}")
+
+        time.sleep(interval)
+
+def map_condensers_to_control_status():
+    """
+    Maps condenser names to their control status data, including address and BIT 9 values.
+
+    :return: A dictionary where keys are condenser names and values are their control status data.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        # Initialize dictionary to store condenser names and control status data
+        condenser_control_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            cond_section = plc_data.get("plc", {}).get("cond", {}).get("evap", {})
+            for evap_cond_name, evap_cond_data in cond_section.items():
+                control_status_data = evap_cond_data.get("EVAP_COND_*_CTRL_STS", {})
+                address = control_status_data.get("address")
+                bit_9_value = control_status_data.get("bits", {}).get("bit 9")
+
+                if address is not None and bit_9_value is not None:
+                    full_cond_name = f"{plc_name}_cond_evap_{evap_cond_name}"
+                    condenser_control_map[full_cond_name] = {
+                        "address": address,
+                        "BIT 9": bit_9_value,
+                    }
+
+        if not condenser_control_map:
+            logger.warning("No condenser control status data found.")
+            return {}
+
+        logger.info("Successfully created condenser control status map.")
+        return condenser_control_map
+
+    except Exception as e:
+        logger.error(f"Error creating condenser control status map: {e}")
+        return {}
+
+
+
+def map_monitored_data():
+    """
+    Creates a map for all data points where the monitor value is 1.
+
+    :return: A dictionary where keys are data point names and values are their details.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        monitored_data_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            data_section = plc_data.get("data", {})
+            for section_name, section_data in data_section.items():
+                for data_type, data_points in section_data.items():
+                    for point_name, point_details in data_points.items():
+                        read_data = point_details.get("read", {})
+                        for key, value in read_data.items():
+                            process = value.get("process")
+                            description = value.get("description")
+                            monitor = value.get("monitor")
+                            max_audio = value.get("max_audio")
+                            min_audio = value.get("min_audio")
+                            if monitor == 1:
+                                full_point_name = f"{process} {description}"
+                                monitored_data_map[full_point_name] = {
+                                    "description": description,
+                                    "type": value.get("type"),
+                                    "raw_value": value.get("raw_value"),
+                                    "scaled_value": value.get("scaled_value"),
+                                    "higher_register": value.get("higher_register"),
+                                    "low_register": value.get("low_register"),
+                                    "monitor": monitor,
+                                    "process": process,
+                                    "max": value.get("max"),
+                                    "min": value.get("min"),
+                                    "max_audio": max_audio,  # Include max_audio
+                                    "min_audio": min_audio  # Include min_audio
+                                }
+
+        if not monitored_data_map:
+            logger.warning("No monitored data points found.")
+            return {}
+
+        logger.info("Successfully created monitored data map.")
+        logger.info(f"Map: {monitored_data_map}")
+        return monitored_data_map
+
+    except Exception as e:
+        logger.error(f"Error creating monitored data map: {e}")
+        return {}
+
+def update_data_monitor_map(interval=1):
+    """
+    Regularly checks the global data_monitor_map for breaches of min and max values and raises alarms.
+
+    :param interval: Interval in seconds for checking the data monitor map.
+    """
+    global data_monitor_map
+    while not stop_events["data_monitor_map"].is_set():
+        try:
+            logger.info("Checking data monitor map for value breaches...")
+
+            # Refresh the monitored data map
+            data_monitor_map = map_monitored_data()
+
+            if not data_monitor_map:
+                logger.warning("No monitored data points available. Retrying...")
+                time.sleep(interval)
+                continue
+
+            for point_name, value in data_monitor_map.items():
+                scaled_value = value.get("scaled_value")
+                max_value = value.get("max")
+                min_value = value.get("min")
+
+                if scaled_value is not None:
+                    if max_value is not None and scaled_value > max_value:
+                        logger.warning(f"ALARM: {point_name} exceeds max value: {scaled_value} > {max_value}")
+                        trigger_alarm(point_name, scaled_value, "max")
+                    if min_value is not None and scaled_value < min_value:
+                        logger.warning(f"ALARM: {point_name} below min value: {scaled_value} < {min_value}")
+                        trigger_alarm(point_name, scaled_value, "min")
+            
+            # Sleep in smaller increments to allow responsive stopping
+            for _ in range(interval * 10):  # Divide the sleep into smaller chunks
+                if stop_events["data_monitor_map"].is_set():
+                    logger.info("Stop event detected. Exiting monitoring loop.")
+                    return
+                time.sleep(0.1)
+        
+        except Exception as e:
+            logger.error(f"Error in data monitor map check: {e}")
+
+
+
+@app.post("/start_iqf", summary="Start IQF Monitoring", description="Start monitoring PLC data for threshold breaches.")
+def start_iqf():
+    global monitoring_thread
+    # get data from storage
+    
+    data = storage.get_data()
+    if not data:
+        raise HTTPException(status_code=400, detail="No data available in storage. Please check the connection to the PLCs.")
+    
+
+    # Check if any condenser is on before starting the iqf process
+    
+    # start montoiring thread for condenser pump and fans
+
+    # Check if screw compressor 2 is on
+    
+    
+
+    # Check if screw compressor 4 is on
+
+    # check if screw compressor 2 suction pressure is below 30 psi
+
+    # start monitoring thread for screw compressor 2 suction pressure
+
+    # Check if liquid pump is on
+
+
+    # Start monitoring thread on compresser 4 suction pressure
+
+    if monitoring_thread and monitoring_thread.is_alive():
+        raise HTTPException(status_code=400, detail="IQF monitoring is already running.")
+
+    logger.info("Starting IQF monitoring thread...")
+    stop_events["data_monitor_map"].clear()  # Clear the stop event to allow monitoring
+
+    monitoring_thread = threading.Thread(target=update_data_monitor_map, args=(5,), daemon=True)
+    monitoring_thread.start()
+
+    return {"message": "IQF monitoring started successfully."}
+
+
+@app.post("/stop_iqf", summary="Stop IQF Monitoring", description="Stop monitoring PLC data.")
+def stop_iqf():
+    global monitoring_thread
+
+    if not monitoring_thread or not monitoring_thread.is_alive():
+        raise HTTPException(status_code=400, detail="IQF monitoring is not running.")
+
+    logger.info("Stopping IQF monitoring thread...")
+    stop_events["data_monitor_map"].set()  # Signal the thread to stop
+    monitoring_thread.join(timeout=5)  # Wait for the thread to terminate
+    if monitoring_thread.is_alive():
+        logger.error("Failed to stop IQF monitoring thread within the timeout.")
+        raise HTTPException(status_code=500, detail="Failed to stop IQF monitoring thread.")
+    
+    monitoring_thread = None  # Reset the thread reference
+    logger.info("IQF monitoring stopped successfully.")
+    return {"message": "IQF monitoring stopped successfully."}
 
 @app.get("/plc_data", summary="Get PLC Data", description="Fetch the latest data from all configured PLCs.")
 def get_plc_data():
@@ -341,8 +670,6 @@ def bit_write_signal(request: BitWriteSignalRequest):
         logger.error(f"Error in bit_write_signal endpoint: {e}")
         raise HTTPException(status_code=500, detail="An internal error occurred.")
 
-
-
 @app.post("/write_signal", summary="Write a Signal to PLC", description="Send a signal to a specific PLC.")
 def write_signal(request: WriteSignalRequest):
     """
@@ -391,286 +718,100 @@ def write_signal(request: WriteSignalRequest):
         logger.error(f"Error in write_signal endpoint: {e}")
         raise HTTPException(status_code=500, detail="An internal error occurred.")
 
-# Function to start the packhouse process
-@app.post("/start_packhouse", summary="Start Packhouse", description="Initiate the packhouse start-up process.")
-def start_packhouse(request: StartPackhouseRequest):
-    """
-    API endpoint to start the packhouse.
 
-    This function starts the required machines and monitors the process to ensure the packhouse is operational.
-
-    :param request: Request body containing the PLC name.
-    :return: Success or failure message.
-    """
-    plc_name = request.plc_name
-
-    try:
-        # Validate PLC name
-        if plc_name not in screw_comp_writer.clients:
-            raise HTTPException(status_code=400, detail=f"PLC '{plc_name}' not found in configuration.")
-
-        # Step 1: Start the compressor
-        logger.info(f"Starting compressor on PLC '{plc_name}'...")
-        if not screw_comp_writer.write_signal(plc_name, "COMPRESSOR START", 1, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to start compressor.")
-
-        # Add 10-second delay between commands
-        logger.info("Waiting for 10 seconds before enabling load mode...")
-        time.sleep(20)
-
-        # Step 2: Enable load mode
-        logger.info(f"Enabling load mode on PLC '{plc_name}'...")
-        if not screw_comp_writer.write_signal(plc_name, "COMPRESSOR STOP", 1, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to enable load mode.")
-
-        # Step 3: Monitor suction pressure
-        logger.info("Monitoring suction pressure...")
-        
-
-        return {"message": f"Packhouse started successfully on '{plc_name}'. Suction pressure is stable."}
-
-    except Exception as e:
-        logger.error(f"Error in start_packhouse: {e}")
-        raise HTTPException(status_code=500, detail="An error occurred while starting the packhouse.")
-    
-@app.post("/start_iqf", summary="Start IQF Process", description="Initiate the IQF start-up process.")
-def start_iqf():
-    """
-    API endpoint to start the IQF process.
-
-    This function performs the steps to start and stop compressors in sequence with delays.
-
-    :return: Success or failure message.
-    """
-    try:
-        # Step 1: Start Compressor A
-        logger.info("Starting compressor: 'Micrologix1400 Screw Comp-A'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-A", "COMPRESSOR START", 1, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to start compressor 'Micrologix1400 Screw Comp-A'.")
-
-        logger.info("Waiting for 10 seconds before next step...")
-        time.sleep(10)
-
-        # Step 2: Start Compressor B
-        logger.info("Starting compressor: 'Micrologix1400 Screw Comp-B'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-B", "COMPRESSOR START", 1, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to start compressor 'Micrologix1400 Screw Comp-B'.")
-
-        logger.info("Waiting for 10 seconds before next step...")
-        time.sleep(10)
-
-        # Step 3: Start Compressor D
-        logger.info("Starting compressor: 'Micrologix1400 Screw Comp-D'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-D", "COMPRESSOR START", 1, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to start compressor 'Micrologix1400 Screw Comp-D'.")
-
-        logger.info("Waiting for 10 seconds before next step...")
-        time.sleep(10)
-
-        # Step 4: Stop Compressor A
-        logger.info("Stopping compressor: 'Micrologix1400 Screw Comp-A'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-A", "COMPRESSOR STOP", 0, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to stop compressor 'Micrologix1400 Screw Comp-A'.")
-
-        logger.info("Waiting for 10 seconds before next step...")
-        time.sleep(10)
-
-        # Step 5: Stop Compressor D
-        logger.info("Stopping compressor: 'Micrologix1400 Screw Comp-D'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-D", "COMPRESSOR STOP", 0, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to stop compressor 'Micrologix1400 Screw Comp-D'.")
-
-        logger.info("Waiting for 10 seconds before next step...")
-        time.sleep(10)
-
-        # Step 6: Stop Compressor B
-        logger.info("Stopping compressor: 'Micrologix1400 Screw Comp-B'...")
-        if not screw_comp_writer.write_signal("Micrologix1400 Screw Comp-B", "COMPRESSOR STOP", 0, "config/screw_comp_write_points.yaml"):
-            raise HTTPException(status_code=500, detail="Failed to stop compressor 'Micrologix1400 Screw Comp-B'.")
-
-        return {"message": "IQF process completed successfully."}
-
-    except Exception as e:
-        logger.error(f"Error in start_iqf: {e}")
-        raise HTTPException(status_code=500, detail="An error occurred while starting the IQF process.")
-
-def monitor_screw_comp_suction_pressure():
-    """
-    Monitors the suction pressure for all screw compressors defined in the configuration.
-
-    - Uses a flag to ensure actions for starting/stopping the compressor and condenser are performed only once.
-    """
-    flags = {}  # A dictionary to maintain flags for each compressor
-
-    while not stop_events["monitor_screw_suction_pressure"].is_set():
-        try:
-            logger.info("Starting suction pressure monitoring...")
-
-            # Fetch data from storage
-            storage_data = storage.get_data()
-            logger.debug(f"Storage Data: {storage_data}")
-
-            # Extract data for "Main PLC"
-            main_plc_data = storage_data.get("Main PLC", {}).get("data", {})
-            screw_comps = main_plc_data.get("comp", {}).get("screw", {})
-            if not screw_comps:
-                logger.warning("No screw compressors data found in storage. Skipping...")
-                time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
-                continue
-
-            for comp_name, comp_data in screw_comps.items():
-                logger.info(f"Processing suction pressure for {comp_name}...")
-
-                # Safely access the suction pressure
-                suction_pressure_data = (
-                    comp_data.get("read", {}).get("COMP_1_SUC_PRESSURE", {})
-                )
-                suction_pressure = suction_pressure_data.get("scaled_value")
-
-                if suction_pressure is None:
-                    logger.warning(
-                        f"Suction pressure data not available for {comp_name}. Skipping..."
-                    )
-                    continue
-
-                logger.info(f"Suction pressure for {comp_name}: {suction_pressure}")
-
-                # Initialize the flag for the compressor if not already set
-                if comp_name not in flags:
-                    flags[comp_name] = False  # False means the compressor is not running
-
-                # Control logic based on suction pressure and the flag state
-                if suction_pressure >= 50 and not flags[comp_name]:
-                    logger.warning(
-                        f"High suction pressure detected for {comp_name}: {suction_pressure} >= 50. Starting condenser, compressor, and loading compressor."
-                    )
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 42022, 0, 1
-                    )  # Start condenser
-                    time.sleep(0.1)  # Short delay for bit toggling
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 42022, 0, 0
-                    )  # Toggle off
-
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 0, 1
-                    )  # Start compressor
-                    time.sleep(0.1)  # Short delay for bit toggling
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 0, 0
-                    )  # Toggle off
-
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 3, 1
-                    )  # Load compressor
-
-                    flags[comp_name] = True  # Set the flag indicating the compressor is running
-
-                elif suction_pressure <= 35 and flags[comp_name]:
-                    logger.warning(
-                        f"Low suction pressure detected for {comp_name}: {suction_pressure} <= 35. Unloading compressor, stopping compressor, and stopping condenser."
-                    )
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 4, 1
-                    )  # Unload compressor
-
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 1, 1
-                    )  # Stop compressor
-                    time.sleep(0.1)  # Short delay for bit toggling
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 41336, 1, 0
-                    )  # Toggle off
-
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 42022, 0, 1
-                    )  # Stop condenser
-                    time.sleep(0.1)  # Short delay for bit toggling
-                    screw_comp_writer.bit_write_signal(
-                        "Main PLC", 42022, 0, 0
-                    )  # Toggle off
-
-                    flags[comp_name] = False  # Reset the flag indicating the compressor is stopped
-
-            # Wait for the next polling interval
-            time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 10)))
-
-        except Exception as e:
-            logger.error(f"Error during suction pressure monitoring: {e}")
-
-
-
-
-def monitor_viltor_comp_suction_pressure():
-    """
-    Monitors the suction pressure for all Viltor compressors defined in the configuration.
-
-    - Reads the configuration file to get compressor details.
-    - Fetches real-time data from the shared storage.
-    - Monitors the suction pressure and triggers an alarm if it exceeds 35.
-    """
-    SUCTION_PRESSURE_THRESHOLD = 35  # Threshold for suction pressure
-    POLLING_INTERVAL = int(os.getenv("POLLING_INTERVAL_PLC", 60))  # Polling interval in seconds
-
-    while not stop_events["monitor_viltor_suction_pressure"].is_set():
-        try:
-            logger.info("Starting Viltor compressor suction pressure monitoring...")
-
-            # Load the Viltor compressor configuration
-            config_file = "config/config.yaml"
-            viltor_comps = plc_reader.load_config(config_file).get("viltor_comp", [])
-
-            if not viltor_comps:
-                logger.error(f"No Viltor compressors found in configuration file: {config_file}")
-                return
-
-            for viltor_comp in viltor_comps:
-                plc_name = viltor_comp.get("name")
-                if not plc_name:
-                    logger.warning("Skipping a Viltor compressor with no name in the configuration.")
-                    continue
-
-                # Fetch data from storage
-                data = storage.get_data().get(plc_name, {})
-                logger.debug(f"Fetched data for {plc_name}: {data}")
-
-                if not data:
-                    logger.warning(f"No data available for {plc_name}. Skipping...")
-                    continue
-
-                # Access nested data for SUCTION PRESSURE
-                suction_pressure = (
-                    data.get("data", {})
-                    .get("read", {})
-                    .get("VILTER_1_SUC_PRESSURE", {})
-                    .get("scaled_value")
-                )
-
-                if suction_pressure is None:
-                    logger.warning(f"Suction pressure data not found for {plc_name}. Skipping...")
-                    continue
-
-                logger.info(f"Suction Pressure for {plc_name}: {suction_pressure}")
-
-                # Check if suction pressure exceeds the threshold
-                if suction_pressure > SUCTION_PRESSURE_THRESHOLD:
-                    logger.warning(
-                        f"WARNING: Suction pressure for {plc_name} is above threshold: {suction_pressure} > {SUCTION_PRESSURE_THRESHOLD}"
-                    )
-                    play_alarm()  # Trigger the alarm
-                else:
-                    logger.info(f"Suction pressure for {plc_name} is normal: {suction_pressure}")
-
-            # Wait for the next polling interval
-            time.sleep(POLLING_INTERVAL)
-
-        except Exception as e:
-            logger.error(f"Error during Viltor compressor suction pressure monitoring: {e}")
-
-
-def play_alarm():
+def trigger_alarm(comp_name, suction_pressure):
+    logger.warning(f"ALARM TRIGGERED: {comp_name} - Suction Pressure: {suction_pressure}")
+    # Play sound or send a notification
     pygame.mixer.init()
-    pygame.mixer.music.load("static/high_suction_pressure_alarm.wav")
+    pygame.mixer.music.load("static/sounds/high_suction_pressure_alarm.wav")
     pygame.mixer.music.play()
-    while pygame.mixer.music.get_busy():  # Wait for the music to finish
-        continue
+
+# A global variable to track the alarm thread
+alarm_thread = None
+
+# Lock to ensure only one alarm thread runs at a time
+alarm_thread_lock = threading.Lock()
+
+# A global set to track active alarms and avoid re-triggering for the same point
+active_alarms = set()
+
+def process_alarm_queue():
+    while not alarm_queue.empty():
+        try:
+            # Fetch the next alarm from the queue
+            point_name, value, threshold_type = alarm_queue.get()
+            alarm_worker(point_name, value, threshold_type)
+
+        except Exception as e:
+            logger.error(f"Error processing alarm queue: {e}")
+
+        finally:
+            # Mark the alarm as processed
+            active_alarms.discard(point_name)
+            logger.info(f"Finished processing alarm for {point_name}.")
+
+def alarm_worker(point_name, value, threshold_type):
+    try:
+        rounded_value = round(value)
+
+        # Fetch audio file name from the data point configuration
+        data_point = data_monitor_map.get(point_name, {})
+        audio_file_key = f"{threshold_type}_audio"
+        audio_file_name = data_point.get(audio_file_key)
+
+        if not audio_file_name:
+            logger.warning(f"No audio file specified for {point_name} ({threshold_type} breach). Skipping alarm.")
+            return
+
+        audio_file = f"static/sounds/{audio_file_name}.mp3"
+
+        if not os.path.exists(audio_file):
+            logger.error(f"Audio file not found: {audio_file}. Cannot play alarm.")
+            return
+
+        logger.warning(f"Alarm triggered for {point_name}. Value {rounded_value} has breached the {threshold_type} threshold.")
+        
+        # Initialize pygame mixer
+        pygame.mixer.init()
+        pygame.mixer.music.load(audio_file)
+        pygame.mixer.music.play()
+        logger.info(f"Playing alarm audio: {audio_file}")
+
+        # Wait for audio playback or timeout
+        start_time = time.time()
+        while pygame.mixer.music.get_busy():
+            if time.time() - start_time > 10:
+                logger.warning(f"Audio playback for {point_name} timed out after 5 seconds.")
+                pygame.mixer.music.stop()
+                break
+            pygame.time.Clock().tick(10)
+
+        pygame.mixer.music.stop()
+        logger.info(f"Stopping alarm audio: {audio_file}")
+
+    except Exception as e:
+        logger.error(f"Error in alarm worker: {e}")
+
+    finally:
+        pygame.mixer.quit()
+
+
+def trigger_alarm(point_name, value, threshold_type):
+    # Check if the alarm is already active
+    if point_name in active_alarms:
+        logger.info(f"Alarm for {point_name} is already active. Skipping re-trigger.")
+        return
+
+    # Add the alarm to the queue
+    alarm_queue.put((point_name, value, threshold_type))
+    active_alarms.add(point_name)
+    logger.info(f"Alarm for {point_name} added to the queue.")
+
+    # Start the alarm processor thread if not already running
+    global alarm_processor_thread
+    if not alarm_processor_thread or not alarm_processor_thread.is_alive():
+        alarm_processor_thread = threading.Thread(target=process_alarm_queue, daemon=True)
+        alarm_processor_thread.start()
+        logger.info("Started alarm processor thread.")
+
+
