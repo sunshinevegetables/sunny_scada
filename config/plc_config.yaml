@@ -1,4 +1,4 @@
-plc:
+plcs:
   - name: "Main PLC"
     ip: "192.168.1.10"
     port: 502

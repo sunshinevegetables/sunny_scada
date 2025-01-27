@@ -7,329 +7,142 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class PLCWriter:
-    def __init__(self, config_type):
+    def __init__(self):
         """
         Initialize PLCWriter with a configuration type to load the relevant YAML configuration.
 
         :param config_type: The type of configuration ('comps', 'vfd', etc., or 'plc' for global configuration)
         """
         try:
-            if config_type == "plc":
-                # Load the unified data points from data_points.yaml
-                data_points_path = os.path.join("config", "data_points.yaml")
-                if not os.path.exists(data_points_path):
-                    raise FileNotFoundError(f"Data points file not found: {data_points_path}")
-
-                with open(data_points_path, "r") as file:
-                    self.write_signals = yaml.safe_load(file).get("data_points", {})
-
-                if not self.write_signals:
-                    raise ValueError(f"No data points found in {data_points_path}")
-
-                # Load PLC configurations from the global config.yaml
-                config_path = os.path.join("config", "config.yaml")
-                if not os.path.exists(config_path):
-                    raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
-
-                with open(config_path, "r") as file:
-                    plc_config = yaml.safe_load(file).get("plcs", [])
-
-                if not plc_config:
-                    raise ValueError(f"No PLC configurations found in {config_path}")
-
-            else:
-                # Load the write signals from the respective YAML file for the specific config_type
-                write_points_path = os.path.join("config", f"{config_type}_write_points.yaml")
-                if not os.path.exists(write_points_path):
-                    raise FileNotFoundError(f"Write points file not found: {write_points_path}")
-
-                with open(write_points_path, "r") as file:
-                    self.write_signals = yaml.safe_load(file).get("data_points", {})
-                
-                if not self.write_signals:
-                    raise ValueError(f"No data points found in {write_points_path}")
-
-                # Load PLC configurations dynamically for the specific config_type
-                config_path = os.path.join("config", f"{config_type}_config.yaml")
-                if not os.path.exists(config_path):
-                    raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
-
-                with open(config_path, "r") as file:
-                    plc_config = yaml.safe_load(file).get(config_type, [])
-
-                if not plc_config:
-                    raise ValueError(f"No PLC configurations found in {config_path}")
+            self.write_signals, plc_config = self.load_configuration()
 
             # Initialize Modbus clients for each PLC
             self.clients = {
                 plc["name"]: ModbusTcpClient(plc["ip"], port=plc["port"]) for plc in plc_config
             }
-
-            logger.info(f"Initialized PLCWriter for '{config_type}' with {len(self.clients)} clients.")
-
-        except FileNotFoundError as e:
-            logger.error(e)
-            raise
+            logger.info(f"Initialized PLCWriter for plc with {len(self.clients)} clients.")
         except Exception as e:
             logger.error(f"Error initializing PLCWriter: {e}")
             raise
 
- 
-    def write_signal(self, plc_name, signal_name, value):
+    def load_configuration(self):
         """
-        Write a value to a specific signal on the PLC.
+        Load the write signals and PLC configuration from `plc_config.yaml` and `data_points.yaml`.
 
-        :param plc_name: Name of the PLC as specified in the configuration.
-        :param signal_name: Name of the signal to write (e.g., "COMPRESSOR START").
-        :param value: Value to write (e.g., 1 for ON, 0 for OFF).
-        :return: True if successful, False otherwise.
+        :return: Tuple of write_signals dictionary and plc_config list
         """
-        logger.info("##### Write Signal #####")
-        logger.info(f"PLC Name: {plc_name}")
-        logger.info(f"Signal Name: {signal_name}")
-        logger.info(f"Value: {value}")
-        logger.info(f" {self.clients}")
-        if plc_name not in self.clients:
-            logger.error(f"PLC '{plc_name}' not found in configuration.")
-            return False
-
-        if signal_name not in self.write_signals:
-            logger.error(f"Signal '{signal_name}' not found in write mapping.")
-            return False
-
-        modbus_address = self.write_signals[signal_name] - 40000  # Adjust for pymodbus 0-based offset
-
-        client = self.clients[plc_name]
         try:
-            if not client.connect():
-                logger.error(f"Failed to connect to PLC '{plc_name}'")
-                return False
+            # Define file paths
+            data_points_path = os.path.join("config", "data_points.yaml")
+            config_path = os.path.join("config", "plc_config.yaml")
 
-            logger.info(f"Writing {value} to {signal_name} at Modbus address {modbus_address} on {plc_name}")
+            # Check if the required files exist
+            if not os.path.exists(data_points_path):
+                raise FileNotFoundError(f"Data points file not found: {data_points_path}")
+            if not os.path.exists(config_path):
+                raise FileNotFoundError(f"PLC configuration file not found: {config_path}")
 
-            # Attempt to write as a coil
-            response = client.write_coil(modbus_address, value)
-            if response.isError():
-                logger.warning(f"Coil write failed for {signal_name}. Trying register write...")
-                # Attempt to write as a register
-                response = client.write_register(modbus_address, value)
-                if response.isError():
-                    logger.error(f"Register write failed for {signal_name} at address {modbus_address}")
-                    return False
-                else:
-                    logger.info(f"Successfully wrote {value} to {signal_name} as register at address {modbus_address}.")
-            else:
-                logger.info(f"Successfully wrote {value} to {signal_name} as coil.")
-            return True
+            # Load the data points
+            with open(data_points_path, "r") as file:
+                write_signals = yaml.safe_load(file).get("data_points", {})
+            if not write_signals:
+                raise ValueError(f"No data points found in {data_points_path}")
+
+            # Load the PLC configuration
+            with open(config_path, "r") as file:
+                plc_config = yaml.safe_load(file).get("plcs", [])
+            if not plc_config:
+                raise ValueError(f"No PLC configurations found in {config_path}")
+
+            logger.info("Successfully loaded configuration from plc_config.yaml and data_points.yaml.")
+            return write_signals, plc_config
 
         except Exception as e:
-            logger.error(f"Exception while writing to {signal_name} on {plc_name}: {e}")
-            return False
-        finally:
-            client.close()
+            logger.error(f"Error loading configuration: {e}")
+            raise
 
-    def viltor_write_signal(self, plc_name, signal_name, value):
-        """
-        Write a bit to a specific position within a Modbus register for Viltor compressors.
-
-        :param plc_name: Name of the PLC as specified in the configuration.
-        :param signal_name: Name of the signal to write (e.g., "MOD_START").
-        :param value: Value to write (1 for ON, 0 for OFF).
-        :return: True if successful, False otherwise.
-        """
-        logger.info("##### Viltor Write Signal #####")
-        logger.info(f"PLC Name: {plc_name}")
-        logger.info(f"Signal Name: {signal_name}")
-        logger.info(f"Value: {value}")
-
-        if plc_name not in self.clients:
-            logger.error(f"PLC '{plc_name}' not found in configuration.")
-            return False
-
-        if signal_name not in self.write_signals:
-            logger.error(f"Signal '{signal_name}' not found in write mapping.")
-            return False
-
-        # Get the register address and bit position from the write_signals mapping
-        write_info = self.write_signals[signal_name]
-        register_address = write_info.get("register") - 40001  # Adjust for pymodbus 0-based indexing
-        bit_position = write_info.get("bit")
-
-        if register_address is None or bit_position is None:
-            logger.error(f"Invalid signal mapping for '{signal_name}': Missing register or bit position.")
-            return False
-
-        client = self.clients[plc_name]
-        try:
-            if not client.connect():
-                logger.error(f"Failed to connect to PLC '{plc_name}'")
-                return False
-
-            logger.info(f"Writing {value} to {signal_name} at register {register_address}, bit {bit_position} on {plc_name}")
-
-            # Read the current value of the register
-            response = client.read_holding_registers(register_address, 1)
-            if response.isError():
-                logger.error(f"Failed to read register {register_address} from PLC '{plc_name}'.")
-                return False
-
-            # Perform bitwise operation to modify the desired bit
-            current_value = response.registers[0]
-            if value == 1:
-                new_value = current_value | (1 << bit_position)  # Set the bit
-            else:
-                new_value = current_value & ~(1 << bit_position)  # Clear the bit
-
-            # Write the modified value back to the register
-            write_response = client.write_register(register_address, new_value)
-            if write_response.isError():
-                logger.error(f"Failed to write modified value {new_value} to register {register_address}.")
-                return False
-
-            logger.info(f"Successfully wrote bit {bit_position} with value {value} to register {register_address}.")
+    def connect_to_client(self, client, plc_name):
+        """Connect to the Modbus client."""
+        if client.connect():
             return True
-        except Exception as e:
-            logger.error(f"Exception during viltor_write_signal for '{signal_name}' on '{plc_name}': {e}")
-            return False
-        finally:
-            client.close()
+        logger.error(f"Failed to connect to PLC '{plc_name}'")
+        return False
 
-    def bit_write_signal(self, plc_name, register_address, bit_position, value):
+    def bit_write_signal(self, client, register_address, bit_position, value):
         """
-        Write a bit to a specific position within a Modbus register.
+        Writes a single bit value to a specific position in a Modbus register.
 
-        :param plc_name: Name of the PLC as specified in the configuration.
+        :param client: ModbusTcpClient instance connected to the PLC.
         :param register_address: Address of the Modbus register.
-        :param bit_position: The bit position to modify (0-15).
-        :param value: The value to write (1 or 0).
+        :param bit_position: Position of the bit in the register (0-based).
+        :param value: Value to write (1 to set the bit, 0 to clear the bit).
         :return: True if successful, False otherwise.
         """
-        logger.info(f"##### Bit Write Signal #####")
-        logger.info(f"PLC Name: {plc_name}")
-        logger.info(f"Register Address: {register_address}")
-        logger.info(f"Bit Position: {bit_position}")
-        logger.info(f"Value: {value}")
-
-        if plc_name not in self.clients:
-            logger.error(f"PLC '{plc_name}' not found in configuration.")
-            return False
-
-        client = self.clients[plc_name]
         try:
+            logger.info(f"Writing bit {bit_position} with value {value} to register {register_address}...")
+
+            # Adjust the address for Modbus 0-based indexing
+            adjusted_address = register_address - 40001 +1
+
+            # Ensure the client is connected
             if not client.connect():
-                logger.error(f"Failed to connect to PLC '{plc_name}'")
+                logger.error("Failed to connect to PLC.")
                 return False
 
             # Read the current value of the register
-            logger.info(f"Reading current value from register {register_address}")
-            response = client.read_holding_registers(register_address - 40001, 1)
-            if response.isError():
-                logger.error(f"Failed to read register {register_address} from PLC '{plc_name}'.")
-                return False
-
-            current_value = response.registers[0]
-            logger.info(f"Current value of register {register_address}: {current_value}")
-
-            # Perform bitwise operation
-            if value == 1:
-                new_value = current_value | (1 << bit_position)  # Set the bit
-            else:
-                new_value = current_value & ~(1 << bit_position)  # Clear the bit
-
-            logger.info(f"Modified value of register {register_address}: {new_value}")
-
-            # Write the modified value back to the register
-            write_response = client.write_register(register_address - 40000, new_value)
-            if write_response.isError():
-                logger.error(f"Failed to write modified value {new_value} to register {register_address}.")
-                return False
-
-            logger.info(f"Successfully wrote bit {bit_position} with value {value} to register {register_address}.")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error during bit_write_signal for register {register_address}: {e}")
-            return False
-
-        finally:
-            client.close()
-
-
-
-    def plc_write_signal(self, plc_name, signal_name, value):
-        """
-        Write a bit to a specific position within a Modbus register or directly to a register for a generic PLC.
-
-        :param plc_name: Name of the PLC as specified in the configuration.
-        :param signal_name: Name of the signal to write (e.g., "START").
-        :param value: Value to write (1 for ON, 0 for OFF, or a numeric value for direct register write).
-        :return: True if successful, False otherwise.
-        """
-        logger.info("##### PLC Write Signal #####")
-        logger.info(f"PLC Name: {plc_name}")
-        logger.info(f"Signal Name: {signal_name}")
-        logger.info(f"Value: {value}")
-
-        if plc_name not in self.clients:
-            logger.error(f"PLC '{plc_name}' not found in configuration.")
-            return False
-
-        if signal_name not in self.write_signals:
-            logger.error(f"Signal '{signal_name}' not found in write mapping.")
-            return False
-
-        # Get the register address and bit position from the write_signals mapping
-        write_info = self.write_signals[signal_name]
-        register_address = write_info.get("register") - 40000  # Adjust for pymodbus 0-based indexing
-        bit_position = write_info.get("bit")
-
-        # Determine if this is a bitwise operation or a direct register write
-        is_bitwise = bit_position is not None
-
-        client = self.clients[plc_name]
-        try:
-            if not client.connect():
-                logger.error(f"Failed to connect to PLC '{plc_name}'")
-                return False
-
-            if is_bitwise:
-                logger.info(f"Performing bitwise write: {value} to {signal_name} at register {register_address}, bit {bit_position}")
-
-                # Read the current value of the register
-                response = client.read_holding_registers(register_address, 1)
-                if response.isError():
-                    logger.error(f"Failed to read register {register_address} from PLC '{plc_name}'.")
-                    return False
-
-                # Perform bitwise operation to modify the desired bit
+            response = client.read_holding_registers(adjusted_address, 1)
+            if response and hasattr(response, "registers") and response.registers:
                 current_value = response.registers[0]
+                logger.debug(f"Current value of register {register_address}: {current_value}")
+
+                # Modify the specified bit
                 if value == 1:
                     new_value = current_value | (1 << bit_position)  # Set the bit
                 else:
                     new_value = current_value & ~(1 << bit_position)  # Clear the bit
 
+                logger.debug(f"Modified value of register {register_address}: {new_value}")
+
                 # Write the modified value back to the register
-                write_response = client.write_register(register_address, new_value)
-                if write_response.isError():
+                write_response = client.write_register(adjusted_address, new_value)
+                if write_response and not write_response.isError():
+                    logger.info(f"Successfully wrote bit {bit_position} with value {value} to register {register_address}.")
+                    return True
+                else:
                     logger.error(f"Failed to write modified value {new_value} to register {register_address}.")
                     return False
-
-                logger.info(f"Successfully wrote bit {bit_position} with value {value} to register {register_address}.")
             else:
-                logger.info(f"Performing direct register write: {value} to {signal_name} at register {register_address}")
-
-                # Write the value directly to the register
-                write_response = client.write_register(register_address, value)
-                if write_response.isError():
-                    logger.error(f"Failed to write value {value} to register {register_address}.")
-                    return False
-
-                logger.info(f"Successfully wrote value {value} to register {register_address}.")
-
-            return True
+                logger.error(f"Failed to read register {register_address} for bit modification.")
+                return False
         except Exception as e:
-            logger.error(f"Exception during plc_write_signal for '{signal_name}' on '{plc_name}': {e}")
+            logger.error(f"Error writing bit {bit_position} to register {register_address}: {e}")
             return False
         finally:
-            client.close()
+            if client:
+                client.close()
+
+   
+
+    def modify_bit(self, current_value, bit_position, value):
+        """Modify a specific bit in a register value."""
+        if value == 1:
+            return current_value | (1 << bit_position)
+        return current_value & ~(1 << bit_position)
+
+    def get_modbus_address(self, signal_name):
+        """Retrieve the Modbus address for a given signal name."""
+        if signal_name not in self.write_signals:
+            logger.error(f"Signal '{signal_name}' not found in write mapping.")
+            return None
+        return self.write_signals[signal_name] - 40000
+
+    def get_register_and_bit(self, write_info):
+        """Retrieve the register address and bit position for a signal."""
+        register_address = write_info.get("register") - 40000
+        bit_position = write_info.get("bit")
+        if register_address is None or bit_position is None:
+            logger.error(f"Invalid signal mapping: Missing register or bit position.")
+            return None, None
+        return register_address, bit_position

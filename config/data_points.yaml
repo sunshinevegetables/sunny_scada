@@ -212,7 +212,7 @@ data_points:
               type: REAL
             COMP_1_SUC_PRESSURE:
               address: 41226
-              description: Suction Pressure
+              description: Comp 1 Suction Pressure
               type: REAL
             COMP_1_SV_POSITON:
               address: 41230
@@ -365,7 +365,7 @@ data_points:
               type: INTEGER
             COMP_2_SUCTION_TEMP:
               address: 41260
-              description: Suction Temperature
+              description: Comp 2 Suction Temperature
               eng_full_scale: 150
               eng_zero_scale: -50
               raw_full_scale: 150
@@ -972,9 +972,21 @@ data_points:
             EVAP_COND_1_CTRL_STS:
               address: 42022
               bits:
+                BIT 1: UNKNOWN
+                BIT 2: UNKNOWN
+                BIT 3: UNKNOWN
+                BIT 4: UNKNOWN
+                BIT 5: UNKNOWN
+                BIT 7: UNKNOWN
+                BIT 8: UNKNOWN
+                BIT 10: UNKNOWN
+                BIT 11: UNKNOWN
                 BIT 12: FAIL TO START
                 BIT 6: PUMP TRIP
-                BIT 9: FAN ON
+                BIT 9: PUMP ON
+                BIT 13: UNKNOWN
+                BIT 14: UNKNOWN
+                BIT 15: UNKNOWN
               description: Control Evaporative Condenser 1
               type: DIGITAL
             EVAP_COND_1_RUN_HR:
@@ -1023,11 +1035,11 @@ data_points:
         evap_cond_2:
           read:
             EVAP_COND_2_CTRL_STS:
-              address: 42023
+              address: 42024
               bits:
                 BIT 12: FAIL TO START
                 BIT 6: PUMP TRIP
-                BIT 9: FAN ON
+                BIT 9: PUMP ON
               description: Control Evaporative Condenser 1
               type: DIGITAL
             EVAP_COND_2_RUN_HR:
@@ -1080,11 +1092,11 @@ data_points:
         evap_cond_3:
           read:
             EVAP_COND_3_CTRL_STS:
-              address: 42024
+              address: 42037
               bits:
                 BIT 12: FAIL TO START
                 BIT 6: PUMP TRIP
-                BIT 9: FAN ON
+                BIT 9: PUMP ON
               description: Control Evaporative Condenser 1
               type: DIGITAL
             EVAP_COND_3_RUN_HR:
@@ -1262,6 +1274,8 @@ data_points:
               address: 41672
               description: Defrost LLSV Close Actual Time
               type: INTEGER
+              process: Test
+              monitor: 1
           write:
             FRO_STORE6_ACU_1_CTRL_STS:
               address: 42014
@@ -2296,6 +2310,8 @@ data_points:
               address: 40134
               description: Temperature
               type: REAL
+              process: Washing
+              monitor: 1
             PACKING_AREA_TEMP_MAX:
               address: 40244
               description: Temp MAX

@@ -36,7 +36,7 @@ storage = DataStorage()
 plc_reader = PLCReader(storage=storage)
 
 # Initialize shared PLC writer
-plc_writer = PLCWriter(config_type="plc")
+plc_writer = PLCWriter()
 
 # Define processes
 processes = ["IQF", "AllRound Packhouse", "Cold Storage", "Frozen Storage"]
@@ -64,6 +64,11 @@ class BitWriteSignalRequest(BaseModel):
     bit: int              # Bit position to write (0-15)
     value: int            # Value to write (0 or 1)
 
+class BitReadSignalRequest(BaseModel):
+    plc_name: str
+    plc_type: str
+    register: str
+    bit: int
 
 # Path to the data_points.yaml file
 DATA_POINTS_FILE = "config/data_points.yaml"
@@ -110,7 +115,9 @@ def update_plc_data():
 
             # Wait for the next polling interval
             time.sleep(int(os.getenv("POLLING_INTERVAL_PLC", 1)))
-
+        except KeyboardInterrupt:
+            logger.info("Shutting down application...")
+            plc_reader.close_clients()
         except FileNotFoundError as e:
             logger.error(f"Configuration or points file not found: {e}")
             break  # Break the loop if a critical file is missing
@@ -390,7 +397,7 @@ def map_comps_to_suction_pressure():
             logger.warning("No suction pressure data found for compressors.")
             return {}
 
-        logger.info("Successfully created suction pressure map.")
+        logger.debug("Successfully created suction pressure map.")
         return suction_pressure_map
 
     except Exception as e:
@@ -405,9 +412,9 @@ def update_condenser_control_map(interval=1):
     while not stop_events["condenser_control_map"].is_set():
         try:
             # Fetch and update the condenser control map
-            logger.info("Updating condenser control map...")
+            logger.debug("Updating condenser control map...")
             condenser_control_map = map_condensers_to_control_status()
-            logger.info(f"Condenser Control Map: {condenser_control_map}")
+            logger.debug(f"Condenser Control Map: {condenser_control_map}")
 
         except Exception as e:
             logger.error(f"Error updating condenser control map: {e}")
@@ -433,24 +440,28 @@ def map_condensers_to_control_status():
 
         # Traverse the data structure
         for plc_name, plc_data in data.items():
-            cond_section = plc_data.get("plc", {}).get("cond", {}).get("evap", {})
-            for evap_cond_name, evap_cond_data in cond_section.items():
-                control_status_data = evap_cond_data.get("EVAP_COND_*_CTRL_STS", {})
-                address = control_status_data.get("address")
-                bit_9_value = control_status_data.get("bits", {}).get("bit 9")
+            condenser_section = plc_data.get("data", {}).get("cond", {})
+            for cond_type, condensers in condenser_section.items():
+                for cond_name, cond_data in condensers.items():
+                    read_data = cond_data.get("read", {})
+                    for key, value in read_data.items():
+                        # Match keys with condenser control status entries
+                        if key.startswith("EVAP_COND") and "CTRL_STS" in key:
+                            bit_9_value = value.get("value", {}).get("BIT 9", {}).get("value")
+                            description = value.get("description")
 
-                if address is not None and bit_9_value is not None:
-                    full_cond_name = f"{plc_name}_cond_evap_{evap_cond_name}"
-                    condenser_control_map[full_cond_name] = {
-                        "address": address,
-                        "BIT 9": bit_9_value,
-                    }
+                            if bit_9_value is not None and description is not None:
+                                full_cond_name = f"{plc_name}_{cond_type}_{cond_name}_{key}"
+                                condenser_control_map[full_cond_name] = {
+                                    "description": description,
+                                    "Pump On": bit_9_value,
+                                }
 
         if not condenser_control_map:
             logger.warning("No condenser control status data found.")
             return {}
 
-        logger.info("Successfully created condenser control status map.")
+        logger.debug("Successfully created condenser control status map.")
         return condenser_control_map
 
     except Exception as e:
@@ -472,7 +483,7 @@ def map_monitored_data():
         if not data:
             logger.warning("No data available in storage.")
             return {}
-
+        #logger.info(f"Data: {data}")
         monitored_data_map = {}
 
         # Traverse the data structure
@@ -483,12 +494,15 @@ def map_monitored_data():
                     for point_name, point_details in data_points.items():
                         read_data = point_details.get("read", {})
                         for key, value in read_data.items():
+                            logger.info(f"Value: {value}")
                             process = value.get("process")
                             description = value.get("description")
                             monitor = value.get("monitor")
+                            logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
                             max_audio = value.get("max_audio")
                             min_audio = value.get("min_audio")
                             if monitor == 1:
+                                logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
                                 full_point_name = f"{process} {description}"
                                 monitored_data_map[full_point_name] = {
                                     "description": description,
@@ -564,15 +578,19 @@ def update_data_monitor_map(interval=1):
 @app.post("/start_iqf", summary="Start IQF Monitoring", description="Start monitoring PLC data for threshold breaches.")
 def start_iqf():
     global monitoring_thread
-    # get data from storage
-    
-    data = storage.get_data()
-    if not data:
-        raise HTTPException(status_code=400, detail="No data available in storage. Please check the connection to the PLCs.")
-    
-
-    # Check if any condenser is on before starting the iqf process
-    
+      
+    # Fetch condenser control map
+    condenser_control_map = map_condensers_to_control_status()
+    if not condenser_control_map:
+        raise HTTPException(status_code=400, detail="No condenser control status data available.")
+    logger.info(f"Condenser Control Map: {condenser_control_map}")
+    # Check if any condenser is on before starting the IQF process
+    condenser_on = any(details["Pump On"] for details in condenser_control_map.values())
+    if not condenser_on:
+        logger.info(f"No condenser is currently on. Attempting to turn on condenser 1.")
+        # Write the condenser control status to turn on condenser 1
+        #success = plc_writer.bit_write_signal(plc_writer.clients.get("plcs"),0, 9, 1)
+    #    
     # start montoiring thread for condenser pump and fans
 
     # Check if screw compressor 2 is on
@@ -589,17 +607,16 @@ def start_iqf():
 
 
     # Start monitoring thread on compresser 4 suction pressure
-
+    """
     if monitoring_thread and monitoring_thread.is_alive():
         raise HTTPException(status_code=400, detail="IQF monitoring is already running.")
 
     logger.info("Starting IQF monitoring thread...")
     stop_events["data_monitor_map"].clear()  # Clear the stop event to allow monitoring
-
     monitoring_thread = threading.Thread(target=update_data_monitor_map, args=(5,), daemon=True)
     monitoring_thread.start()
-
-    return {"message": "IQF monitoring started successfully."}
+    """
+    return {"message": "IQF started successfully."}
 
 
 @app.post("/stop_iqf", summary="Stop IQF Monitoring", description="Stop monitoring PLC data.")
@@ -624,6 +641,74 @@ def stop_iqf():
 def get_plc_data():
     return storage.get_data()
 
+@app.post("/bit_read_signal", summary="Read a Bit Signal from PLC", description="Read a specific bit from a Modbus register.")
+def bit_read_signal(request: BitReadSignalRequest):
+    """
+    API endpoint to read a specific bit in a Modbus register.
+    """
+    logger.info(f"Received bit read signal request: {request}")
+    try:
+        # Load the read points from the unified data_points.yaml file
+        read_points_path = "config/data_points.yaml"
+
+        # Load the read points
+        with open(read_points_path, "r") as file:
+            data_points = yaml.safe_load(file).get("data_points", {}).get("plcs", {})
+        
+        # Navigate to the appropriate register within the YAML structure
+        target_register = None
+        for plc_category, plc_data in data_points.items():
+            logger.info(f"PLC Category: {plc_category}")
+            for sub_category, sub_data in plc_data.items():
+                logger.info(f"Sub Category: {sub_category}")
+                for sub_sub_category, sub_sub_data in sub_data.items():
+                    logger.info(f"Sub Sub Category: {sub_sub_category}")
+                    read_data = sub_sub_data.get("read", {})
+                    logger.info(f"Read Data: {read_data}")
+                
+                    if request.register in read_data:
+                        target_register = read_data[request.register]
+                        logger.info(f"Target Register: {target_register}")
+                        break
+                if target_register:
+                    break
+            if target_register:
+                break
+
+        if not target_register:
+            raise HTTPException(status_code=400, detail=f"Register '{request.register}' not recognized in {read_points_path}.")
+
+        # Extract the address and bit details
+        register_address = target_register.get("address")
+        bits = target_register.get("bits", {})
+
+        if register_address is None or f"BIT {request.bit}" not in bits:
+            raise HTTPException(status_code=400, detail=f"Invalid bit '{request.bit}' for register '{request.register}'.")
+
+        # Get the Modbus client for the PLC
+        client = plc_reader.clients.get(request.plc_name)
+        if not client:
+            logger.error(f"No Modbus client found for PLC '{request.plc_name}'.")
+            raise HTTPException(status_code=400, detail=f"PLC '{request.plc_name}' not found.")
+
+        # Read the signal using the PLCReader's `read_single_bit` method
+        bit_value = plc_reader.read_single_bit(client, register_address, request.bit)
+
+        if bit_value is None:
+            raise HTTPException(status_code=500, detail="Failed to read bit signal.")
+
+        return {
+            "message": f"Successfully read value {bit_value} from bit {request.bit} of register {request.register} on {request.plc_name}",
+            "value": bit_value
+        }
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in bit_read_signal endpoint: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred.")
+
+
 @app.post("/bit_write_signal", summary="Write a Bit Signal to PLC", description="Send a bitwise signal to a specific PLC.")
 def bit_write_signal(request: BitWriteSignalRequest):
     """
@@ -631,33 +716,52 @@ def bit_write_signal(request: BitWriteSignalRequest):
     """
     logger.info(f"Received bit write signal request: {request}")
     try:
-        # Determine the write points YAML file based on plc_type
-        if request.plc_type == "screw_comp":
-            write_points_path = "config/screw_comp_write_points.yaml"
-        elif request.plc_type == "viltor_comp":
-            write_points_path = "config/viltor_comp_write_points.yaml"
-        elif request.plc_type == "plc":
-            write_points_path = "config/plc_write_points.yaml"
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
+        
+        
+        # Navigate to the appropriate register within the YAML structure
+        target_register = None
+        #logger.info(f"PLC Writer: {plc_writer.write_signals}")
+        for plcs, data_points in plc_writer.write_signals.items():
+            for plc_category, plc_data in data_points.items():
+                #logger.info(f"PLC Category: {plc_category}")
+                for sub_category, sub_data in plc_data.items():
+                    #logger.info(f"Sub Category: {sub_category}")
+                    for sub_sub_category, sub_sub_data in sub_data.items():
+                        #logger.info(f"Sub Sub Category: {sub_sub_category}")
+                        write_data = sub_sub_data.get("write", {})
+                        #logger.info(f"Write Data: {write_data}")
+                    
+                        if request.register in write_data:
+                            target_register = write_data[request.register]
+                            logger.info(f"Target Register: {target_register}")
+                            break
+                    if target_register:
+                        break
+                if target_register:
+                    break
 
-        # Load the write points
-        with open(write_points_path, "r") as file:
-            write_signals = yaml.safe_load(file).get("data_points", {})
+        if not target_register:
+            raise HTTPException(status_code=400, detail=f"Register '{request.register}' not recognized in write points.")
 
-        # Validate the register and bit
-        if request.register not in write_signals:
-            raise HTTPException(status_code=400, detail=f"Register '{request.register}' not recognized in {write_points_path}.")
+        
+        # Extract the register address and bit mapping
+        register_address = target_register.get("address")
+        bits = target_register.get("bits", {})
 
-        register_info = write_signals[request.register]
-        register_address = register_info.get("register")
-        bits = {bit["bit_name"]: bit["bit"] for bit in register_info.get("bits", [])}
+        if register_address is None or f"BIT {request.bit}" not in bits:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid bit '{request.bit}' for register '{request.register}'. Available bits: {list(bits.keys())}",
+            )
 
-        if register_address is None or request.bit not in bits.values():
-            raise HTTPException(status_code=400, detail=f"Invalid bit '{request.bit}' for register '{request.register}'.")
-
+        # Get the Modbus client for the PLC
+        client = plc_writer.clients.get(request.plc_name)
+        if not client:
+            logger.error(f"No Modbus client found for PLC '{request.plc_name}'.")
+            raise HTTPException(status_code=400, detail=f"PLC '{request.plc_name}' not found.")
+        
         # Write the signal using the PLCWriter
-        success = plc_writer.bit_write_signal(request.plc_name, register_address, request.bit, request.value)
+        success = plc_writer.bit_write_signal(client, register_address, request.bit, request.value)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to write bit signal.")
@@ -756,9 +860,11 @@ def alarm_worker(point_name, value, threshold_type):
 
         # Fetch audio file name from the data point configuration
         data_point = data_monitor_map.get(point_name, {})
+        #logger.info(f"Data Point: {data_point}")
         audio_file_key = f"{threshold_type}_audio"
+        #logger.info(f"Audio File Key: {audio_file_key}")
         audio_file_name = data_point.get(audio_file_key)
-
+        #logger.info(f"Audio File Name: {audio_file_name}")
         if not audio_file_name:
             logger.warning(f"No audio file specified for {point_name} ({threshold_type} breach). Skipping alarm.")
             return
