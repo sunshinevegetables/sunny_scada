@@ -122,6 +122,9 @@ class PLCReader:
     def read_data_point(self, client, point_name, point_details):
         """Reads a specific data point based on its type."""
         try:
+            
+            #logger.info(f"Reading data point '{point_name}'...")
+            #logger.info(f"Point details: {point_details}")
             address = point_details.get("address")
             data_type = point_details.get("type")
             description = point_details.get("description")
@@ -202,6 +205,7 @@ class PLCReader:
                 "max": max_value,
                 "max_audio": max_audio,
                 "min_audio": min_audio,
+                "register_address": register_address
             }
         else:
             logger.warning(f"Failed to read real '{point_name}' at address {register_address}.")
@@ -233,6 +237,7 @@ class PLCReader:
                 "max": max_value,
                 "max_audio": max_audio,
                 "min_audio": min_audio,
+                "register_address": register_address
             }
         else:
             logger.warning(f"Failed to read digital '{point_name}' at address {register_address}.")
@@ -248,10 +253,10 @@ class PLCReader:
         :return: Boolean value of the bit or None if an error occurs.
         """
         try:
-            logger.info(f"Reading bit {bit_position} from register {register_address}...")
+            #logger.info(f"Reading bit {bit_position} from register {register_address}...")
 
             # Adjust the address to account for Modbus 0-based indexing
-            adjusted_address = register_address - 40001 + 2
+            adjusted_address = register_address - 40001 + 1
 
             # Read the single register
             response = client.read_holding_registers(adjusted_address, 1)
@@ -259,7 +264,7 @@ class PLCReader:
                 # Extract the register value and evaluate the specific bit
                 register_value = response.registers[0]
                 bit_value = bool(register_value & (1 << bit_position))
-                logger.info(f"Read bit {bit_position} value: {bit_value}")
+                #logger.info(f"Read bit {bit_position} value: {bit_value}")
                 return bit_value
             else:
                 logger.error(f"Failed to read register {register_address}.")

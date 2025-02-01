@@ -90,6 +90,10 @@ data_points:
               address: 40140
               description: Temperature
               type: REAL
+              process: COLD
+              monitor: 1
+              max: 4
+              min: -1
             ANTE_ROOM_TEMP_MAX:
               address: 40256
               description: Temp MAX
@@ -362,7 +366,24 @@ data_points:
             COMP_2_STATUS_2:
               address: 41343
               description: Status Register 2
-              type: INTEGER
+              type: DIGITAL
+              bits:
+                BIT 1: UNKNOWN
+                BIT 2: UNKNOWN
+                BIT 3: UNKNOWN
+                BIT 4: UNKNOWN
+                BIT 5: UNKNOWN
+                BIT 6: OIL PUMP
+                BIT 7: COMP STS
+                BIT 8: UNKNOWN
+                BIT 10: UNKNOWN
+                BIT 11: UNKNOWN
+                BIT 12: UNKNOWN
+                BIT 6: UNKNOWN
+                BIT 9: UNKNOWN
+                BIT 13: UNKNOWN
+                BIT 14: UNKNOWN
+                BIT 15: UNKNOWN          
             COMP_2_SUCTION_TEMP:
               address: 41260
               description: Comp 2 Suction Temperature
@@ -1587,6 +1608,11 @@ data_points:
               address: 40120
               description: Temperature
               type: REAL
+              process: FROZEN
+              monitor: 0
+              min: -24
+              max: -16
+              max_audio: iqf_suction_pressure_breach_max
             FROZN_ROOM1_TEMP_MAX:
               address: 40214
               description: Temp MAX
@@ -1768,6 +1794,11 @@ data_points:
               address: 40122
               description: Temperature
               type: REAL
+              process: FROZEN
+              monitor: 0
+              max: -16
+              min: -24
+              max_audio: 
             FROZN_ROOM2_TEMP_MAX:
               address: 40218
               description: Temp MAX
@@ -1945,6 +1976,11 @@ data_points:
               address: 40124
               description: Temperature
               type: REAL
+              process: FROZEN
+              monitor: 1
+              max: -16
+              min: -24
+              max_audio: 
             FROZN_ROOM3_TEMP_MAX:
               address: 40222
               description: Temp MAX
@@ -2112,6 +2148,11 @@ data_points:
               address: 40126
               description: Temperature
               type: REAL
+              process: FROZEN
+              monitor: 0
+              max: -16
+              min: -24
+              max_audio: 
             FROZN_ROOM4_TEMP_MAX:
               address: 40226
               description: Temperature
@@ -2279,6 +2320,10 @@ data_points:
               address: 40128
               description: Temperature
               type: REAL
+              process: FROZEN
+              monitor: 1
+              max: -16
+              min: -24
             FROZN_ROOM5_TEMP_MAX:
               address: 40230
               description: Temp MAX

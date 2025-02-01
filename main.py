@@ -39,7 +39,7 @@ plc_reader = PLCReader(storage=storage)
 plc_writer = PLCWriter()
 
 # Define processes
-processes = ["IQF", "AllRound Packhouse", "Cold Storage", "Frozen Storage"]
+processes = ["IQF", "AllRound Packhouse", "Cold Storage", "Frozen"]
 
 # Define stop events for threads
 stop_events = {
@@ -47,7 +47,9 @@ stop_events = {
     "plc": threading.Event(),
     "suction_pressure_map": threading.Event(),
     "data_monitor_map": threading.Event(),
-    "condenser_control_map": threading.Event()
+    "condenser_control_map": threading.Event(),
+    "frozen_storage_map": threading.Event(),
+    "cold_storage_map": threading.Event(),
     }
 
 # Define the model for the request body
@@ -166,8 +168,11 @@ async def lifespan(app: FastAPI):
     
     threads.append(threading.Thread(target=update_plc_data, daemon=True))
     #threads.append(threading.Thread(target=update_suction_pressure_map, args=(5,), daemon=True))
-    #threads.append(threading.Thread(target=update_data_monitor_map, args=(5,), daemon=True))
-    threads.append(threading.Thread(target=update_condenser_control_map, daemon=True))
+    #threads.append(threading.Thread(target=update_data_monitor_map, args=(10,), daemon=True))
+    threads.append(threading.Thread(target=update_frozen_storage_map, args=(10,), daemon=True))
+    threads.append(threading.Thread(target=update_cold_storage_map, args=(10,), daemon=True))
+    
+    #threads.append(threading.Thread(target=update_condenser_control_map, daemon=True))
     # Start all enabled threads
     for thread in threads:
         thread.start()
@@ -468,7 +473,256 @@ def map_condensers_to_control_status():
         logger.error(f"Error creating condenser control status map: {e}")
         return {}
 
+def map_compressors_to_status():
+    """
+    Maps compressor names to their status data, including address and BIT 7 values.
 
+    :return: A dictionary where keys are compressor names and values are their status data.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        # Initialize dictionary to store compressor names and status data
+        compressor_status_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            compressor_section = plc_data.get("data", {}).get("comp", {})  # Assuming "comp" holds compressors
+            for comp_type, compressors in compressor_section.items():
+                for comp_name, comp_data in compressors.items():
+                    read_data = comp_data.get("read", {})
+                    for key, value in read_data.items():
+                        # Match keys with compressor status entries
+                        if key in ["COMP_1_STATUS_2", "COMP_2_STATUS_2", "COMP_3_STATUS_2", "COMP_4_STATUS_2"]:
+                            bit_7_value = value.get("value", {}).get("BIT 7", {}).get("value")  # Extract bit 7 (ON/OFF)
+                            description = value.get("description")
+
+                            if bit_7_value is not None and description is not None:
+                                full_comp_name = f"{plc_name}_{comp_type}_{comp_name}_{key}"
+                                compressor_status_map[full_comp_name] = {
+                                    "description": description,
+                                    "Running": bit_7_value,
+                                }
+
+        if not compressor_status_map:
+            logger.warning("No compressor status data found.")
+            return {}
+
+        logger.debug("Successfully created compressor status map.")
+        return compressor_status_map
+
+    except Exception as e:
+        logger.error(f"Error creating compressor status map: {e}")
+        return {}
+
+def map_frozen_storage_temps():
+    """
+    Creates a map for all temperature data points in frozen storage rooms where monitoring is enabled.
+
+    :return: A dictionary where keys are chamber names and values are temperature details.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        frozen_storage_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            data_section = plc_data.get("data", {})
+            for section_name, section_data in data_section.items():
+                for data_type, data_points in section_data.items():
+                    for point_name, point_details in data_points.items():
+                        read_data = point_details.get("read", {})
+                        for key, value in read_data.items():
+                            #logger.info(f"Value: {value}")
+                            process = value.get("process")
+                            description = value.get("description")
+                            monitor = value.get("monitor")
+                            #logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
+                            max_audio = value.get("max_audio")
+                            min_audio = value.get("min_audio")
+                            if process == "FROZEN":
+                                if monitor == 1:
+                                    #logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
+                                    full_point_name = f"{data_type} {process} {description}"
+                                    frozen_storage_map[full_point_name] = {
+                                        "description": description,
+                                        "type": value.get("type"),
+                                        "raw_value": value.get("raw_value"),
+                                        "scaled_value": value.get("scaled_value"),
+                                        "higher_register": value.get("higher_register"),
+                                        "low_register": value.get("low_register"),
+                                        "monitor": monitor,
+                                        "process": process,
+                                        "max": value.get("max"),
+                                        "min": value.get("min"),
+                                        "max_audio": max_audio,  # Include max_audio
+                                        "min_audio": min_audio  # Include min_audio
+                                    }
+
+        if not frozen_storage_map:
+            logger.warning("No frozen storage temperature data found.")
+            return {}
+
+        logger.info("Successfully created frozen storage temperature map.")
+        return frozen_storage_map
+
+    except Exception as e:
+        logger.error(f"Error creating frozen storage temperature map: {e}")
+        return {}
+
+def update_frozen_storage_map(interval=1):
+    """
+    Regularly checks the global frozen storage temperature map for breaches of min and max values and raises alarms.
+
+    :param interval: Interval in seconds for checking the temperature map.
+    """
+    global frozen_storage_map
+    while not stop_events["frozen_storage_map"].is_set():
+        try:
+            logger.info("Checking frozen storage temperature map for breaches...")
+
+            # Refresh the monitored temperature data map
+            frozen_storage_map = map_frozen_storage_temps()
+            #logger.info(f"Frozen Storage Map: {frozen_storage_map}")
+            if not frozen_storage_map:
+                logger.warning("No frozen storage data points available. Retrying...")
+                time.sleep(interval)
+                continue
+
+            for point_name, value in frozen_storage_map.items():
+                scaled_value = value.get("scaled_value")
+                max_value = value.get("max")
+                min_value = value.get("min")
+
+                if scaled_value is not None:
+                    if max_value is not None and scaled_value > max_value:
+                        logger.warning(f"ALARM: {point_name} exceeds max value: {scaled_value} > {max_value}")
+                        trigger_alarm(point_name, scaled_value, "max")
+                    if min_value is not None and scaled_value < min_value:
+                        logger.warning(f"ALARM: {point_name} below min value: {scaled_value} < {min_value}")
+                        trigger_alarm(point_name, scaled_value, "min")
+
+            # Sleep in smaller increments to allow responsive stopping
+            for _ in range(interval * 10):  
+                if stop_events["frozen_storage_map"].is_set():
+                    logger.info("Stop event detected. Exiting monitoring loop.")
+                    return
+                time.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"Error in frozen storage temperature monitoring: {e}")
+
+def map_cold_storage_temps():
+    """
+    Creates a map for all temperature data points in cold storage rooms where monitoring is enabled.
+
+    :return: A dictionary where keys are chamber names and values are temperature details.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        cold_storage_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            data_section = plc_data.get("data", {})
+            for section_name, section_data in data_section.items():
+                for data_type, data_points in section_data.items():
+                    for point_name, point_details in data_points.items():
+                        read_data = point_details.get("read", {})
+                        for key, value in read_data.items():
+                            process = value.get("process")
+                            description = value.get("description")
+                            monitor = value.get("monitor")
+                            max_audio = value.get("max_audio")
+                            min_audio = value.get("min_audio")
+
+                            # Process only Cold Storage Data
+                            if process == "COLD" and monitor == 1:
+                                full_point_name = f"{data_type} {process} {description}"
+                                cold_storage_map[full_point_name] = {
+                                    "description": description,
+                                    "type": value.get("type"),
+                                    "raw_value": value.get("raw_value"),
+                                    "scaled_value": value.get("scaled_value"),
+                                    "higher_register": value.get("higher_register"),
+                                    "low_register": value.get("low_register"),
+                                    "monitor": monitor,
+                                    "process": process,
+                                    "max": value.get("max"),
+                                    "min": value.get("min"),
+                                    "max_audio": max_audio,  # Include max_audio
+                                    "min_audio": min_audio  # Include min_audio
+                                }
+
+        if not cold_storage_map:
+            logger.warning("No cold storage temperature data found.")
+            return {}
+
+        logger.info("Successfully created cold storage temperature map.")
+        return cold_storage_map
+
+    except Exception as e:
+        logger.error(f"Error creating cold storage temperature map: {e}")
+        return {}
+
+def update_cold_storage_map(interval=1):
+    """
+    Regularly checks the global cold storage temperature map for breaches of min and max values and raises alarms.
+
+    :param interval: Interval in seconds for checking the temperature map.
+    """
+    global cold_storage_map
+    while not stop_events["cold_storage_map"].is_set():
+        try:
+            logger.info("Checking cold storage temperature map for breaches...")
+
+            # Refresh the monitored temperature data map
+            cold_storage_map = map_cold_storage_temps()
+            
+            if not cold_storage_map:
+                logger.warning("No cold storage data points available. Retrying...")
+                time.sleep(interval)
+                continue
+
+            for point_name, value in cold_storage_map.items():
+                scaled_value = value.get("scaled_value")
+                max_value = value.get("max")
+                min_value = value.get("min")
+
+                if scaled_value is not None:
+                    if max_value is not None and scaled_value > max_value:
+                        logger.warning(f"ALARM: {point_name} exceeds max value: {scaled_value} > {max_value}")
+                        trigger_alarm(point_name, scaled_value, "max")
+                    if min_value is not None and scaled_value < min_value:
+                        logger.warning(f"ALARM: {point_name} below min value: {scaled_value} < {min_value}")
+                        trigger_alarm(point_name, scaled_value, "min")
+
+            # Sleep in smaller increments to allow responsive stopping
+            for _ in range(interval * 10):  
+                if stop_events["cold_storage_map"].is_set():
+                    logger.info("Stop event detected. Exiting monitoring loop.")
+                    return
+                time.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"Error in cold storage temperature monitoring: {e}")
 
 def map_monitored_data():
     """
@@ -494,11 +748,11 @@ def map_monitored_data():
                     for point_name, point_details in data_points.items():
                         read_data = point_details.get("read", {})
                         for key, value in read_data.items():
-                            logger.info(f"Value: {value}")
+                            #logger.info(f"Value: {value}")
                             process = value.get("process")
                             description = value.get("description")
                             monitor = value.get("monitor")
-                            logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
+                            #logger.info(f"Process: {process}, Description: {description}, Monitor: {monitor}")
                             max_audio = value.get("max_audio")
                             min_audio = value.get("min_audio")
                             if monitor == 1:
@@ -524,12 +778,13 @@ def map_monitored_data():
             return {}
 
         logger.info("Successfully created monitored data map.")
-        logger.info(f"Map: {monitored_data_map}")
+        #logger.info(f"Map: {monitored_data_map}")
         return monitored_data_map
 
     except Exception as e:
         logger.error(f"Error creating monitored data map: {e}")
         return {}
+
 
 def update_data_monitor_map(interval=1):
     """
@@ -581,23 +836,153 @@ def start_iqf():
       
     # Fetch condenser control map
     condenser_control_map = map_condensers_to_control_status()
+    compressor_status_map = map_compressors_to_status()
+
     if not condenser_control_map:
         raise HTTPException(status_code=400, detail="No condenser control status data available.")
     logger.info(f"Condenser Control Map: {condenser_control_map}")
     # Check if any condenser is on before starting the IQF process
     condenser_on = any(details["Pump On"] for details in condenser_control_map.values())
     if not condenser_on:
-        logger.info(f"No condenser is currently on. Attempting to turn on condenser 1.")
-        # Write the condenser control status to turn on condenser 1
-        #success = plc_writer.bit_write_signal(plc_writer.clients.get("plcs"),0, 9, 1)
-    #    
+        logger.info("No condenser is currently on. Attempting to turn on condenser 1.")
+
+        # Perform the first write operation (set bit 0 to 1)
+        success_first = plc_writer.bit_write_signal(plc_writer.clients.get("Main PLC"), 42022, 0, 1)
+        if not success_first:
+            logger.error("Failed to set bit 0 to 1 for condenser 1.")
+            raise HTTPException(status_code=500, detail="Failed to turn on condenser 1 (first operation).")
+
+        logger.info("Successfully set bit 0 to 1 for condenser 1. Now resetting bit 0 to 0.")
+
+        # Perform the second write operation (reset bit 0 to 0)
+        success_second = plc_writer.bit_write_signal(plc_writer.clients.get("Main PLC"), 42022, 0, 0)
+        if not success_second:
+            logger.error("Failed to reset bit 0 to 0 for condenser 1.")
+            raise HTTPException(status_code=500, detail="Failed to reset condenser 1 (second operation).")
+
+        logger.info("Condenser 1 turned on and reset successfully. Verifying status...")
+
+        time.sleep(10)
+        # Check if condenser pump and fans are on
+        client = plc_reader.clients.get("Main PLC")
+        if not client:
+            logger.error("No Modbus client found for PLC 'Main PLC'.")
+            raise HTTPException(status_code=500, detail="Failed to verify condenser status (no client available).")
+
+        bit_status = plc_reader.read_data_point(
+            client,
+            point_name="Condenser 1 Pump Status",
+            point_details={
+                "address": 42022,
+                "type": "DIGITAL",
+                "description": "Pump On Status",
+                "bits": {"BIT 9": "PUMP ON"}
+            },
+        )
+
+        if not bit_status or not bit_status.get("value", {}).get("BIT 9", {}).get("value", False):
+            logger.error("Condenser 1 failed to turn on. Bit 9 is not True.")
+            raise HTTPException(status_code=500, detail="Condenser 1 failed to turn on (verification failed).")
+
+        logger.info("Condenser 1 is now ON. Verification successful.")
+
+    else:
+        logger.info("At least one condenser is already ON. Proceeding with IQF start.")
+           
     # start montoiring thread for condenser pump and fans
 
     # Check if screw compressor 2 is on
     
-    
+   
+    # Wait before checking the compressor status
+    time.sleep(10)
 
-    # Check if screw compressor 4 is on
+    if not compressor_status_map:
+        raise HTTPException(status_code=400, detail="No compressor status data available.")
+    logger.info(f"Compressor Status Map: {compressor_status_map}")
+
+    # Check if Compressor 1 is ON
+    comp1_key = "MainPLC_screw_COMP_1_STATUS_2"
+    is_comp1_on = compressor_status_map.get(comp1_key, {}).get("Running", 0)
+
+    if is_comp1_on:
+        logger.info("Compressor 1 is already ON.")
+    else:
+        logger.info("Compressor 1 is OFF. Attempting to turn it on.")
+
+        # Get the Modbus client for the PLC
+        client = plc_reader.clients.get("Main PLC")
+        if not client:
+            logger.error("No Modbus client found for PLC 'Main PLC'.")
+            raise HTTPException(status_code=500, detail="Failed to verify Compressor 1 status (no client available).")
+
+        try:
+            # Perform the first write operation: set bit 0 to 1
+            success_first = plc_writer.bit_write_signal(client, 41340, 0, 1)
+            if not success_first:
+                logger.error("Failed to set bit 0 to 1 for Compressor 1.")
+                raise HTTPException(status_code=500, detail="Failed to turn on Compressor 1 (first operation).")
+
+            logger.info("Successfully set bit 0 to 1 for Compressor 1. Now resetting bit 0 to 0.")
+
+            # Perform the second write operation: reset bit 0 to 0
+            success_second = plc_writer.bit_write_signal(client, 41340, 0, 0)
+            if not success_second:
+                logger.error("Failed to reset bit 0 to 0 for Compressor 1.")
+                raise HTTPException(status_code=500, detail="Failed to reset Compressor 1 (second operation).")
+
+            logger.info("Compressor 1 turned on and reset successfully.")
+
+        except Exception as e:
+            logger.error(f"Error while processing Compressor 1 operations: {e}")
+            raise HTTPException(status_code=500, detail="An error occurred while managing Compressor 1.")
+
+
+
+    # Wait before checking the compressor status
+    time.sleep(10)
+
+    # Fetch compressor control map
+    compressor_status_map = map_compressors_to_status()
+    if not compressor_status_map:
+        raise HTTPException(status_code=400, detail="No compressor status data available.")
+    logger.info(f"Compressor Status Map: {compressor_status_map}")
+
+    # Check if Compressor 4 is ON
+    comp4_key = "MainPLC_screw_COMP_4_STATUS_2"  # Adjust key format if necessary
+    is_comp4_on = compressor_status_map.get(comp4_key, {}).get("Running", 0)
+
+    if is_comp4_on:
+        logger.info("Screw Compressor 4 is already ON.")
+    else:
+        logger.info("Screw Compressor 4 is OFF. Attempting to turn it on.")
+
+        # Get the Modbus client for the PLC
+        client = plc_reader.clients.get("Main PLC")
+        if not client:
+            logger.error("No Modbus client found for PLC 'Main PLC'.")
+            raise HTTPException(status_code=500, detail="Failed to verify Compressor 4 status (no client available).")
+
+        try:
+            # Perform the first write operation: set bit 0 to 1
+            success_first = plc_writer.bit_write_signal(client, 41348, 0, 1)  # 41348 = Start command for COMP 4
+            if not success_first:
+                logger.error("Failed to set bit 0 to 1 for Screw Compressor 4.")
+                raise HTTPException(status_code=500, detail="Failed to turn on Screw Compressor 4 (first operation).")
+
+            logger.info("Successfully set bit 0 to 1 for Screw Compressor 4. Now resetting bit 0 to 0.")
+
+            # Perform the second write operation: reset bit 0 to 0
+            success_second = plc_writer.bit_write_signal(client, 41348, 0, 0)
+            if not success_second:
+                logger.error("Failed to reset bit 0 to 0 for Screw Compressor 4.")
+                raise HTTPException(status_code=500, detail="Failed to reset Screw Compressor 4 (second operation).")
+
+            logger.info("Screw Compressor 4 turned on and reset successfully.")
+
+        except Exception as e:
+            logger.error(f"Error while processing Screw Compressor 4 operations: {e}")
+            raise HTTPException(status_code=500, detail="An error occurred while managing Screw Compressor 4.")
 
     # check if screw compressor 2 suction pressure is below 30 psi
 
@@ -658,17 +1043,17 @@ def bit_read_signal(request: BitReadSignalRequest):
         # Navigate to the appropriate register within the YAML structure
         target_register = None
         for plc_category, plc_data in data_points.items():
-            logger.info(f"PLC Category: {plc_category}")
+            #logger.info(f"PLC Category: {plc_category}")
             for sub_category, sub_data in plc_data.items():
-                logger.info(f"Sub Category: {sub_category}")
+                #logger.info(f"Sub Category: {sub_category}")
                 for sub_sub_category, sub_sub_data in sub_data.items():
-                    logger.info(f"Sub Sub Category: {sub_sub_category}")
+                    #logger.info(f"Sub Sub Category: {sub_sub_category}")
                     read_data = sub_sub_data.get("read", {})
-                    logger.info(f"Read Data: {read_data}")
+                    #logger.info(f"Read Data: {read_data}")
                 
                     if request.register in read_data:
                         target_register = read_data[request.register]
-                        logger.info(f"Target Register: {target_register}")
+                        #logger.info(f"Target Register: {target_register}")
                         break
                 if target_register:
                     break
@@ -774,109 +1159,43 @@ def bit_write_signal(request: BitWriteSignalRequest):
         logger.error(f"Error in bit_write_signal endpoint: {e}")
         raise HTTPException(status_code=500, detail="An internal error occurred.")
 
-@app.post("/write_signal", summary="Write a Signal to PLC", description="Send a signal to a specific PLC.")
-def write_signal(request: WriteSignalRequest):
-    """
-    API endpoint to write a signal to a PLC.
-    """
-    logger.info(f"Received write signal request: {request}")
-    try:
-        # Determine the write points YAML file based on plc_type
-        if request.plc_type == "screw_comp":
-            write_points_path = "config/screw_comp_write_points.yaml"
-        elif request.plc_type == "viltor_comp":
-            write_points_path = "config/viltor_comp_write_points.yaml"
-        elif request.plc_type =="plc":
-            write_points_path = "config/data_points.yaml"
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
-
-        # Load the write points
-        with open(write_points_path, "r") as file:
-            write_signals = yaml.safe_load(file).get("data_points", {})
-
-        # Validate the signal name
-        if request.signal_name not in write_signals:
-            raise HTTPException(status_code=400, detail=f"Signal '{request.signal_name}' not recognized in {write_points_path}.")
-
-        # Write the signal using the PLCWriter
-        if request.plc_type == "screw_comp":
-            logger.info(f"Screw Request: {request}")
-            success = screw_comp_writer.write_signal(request.plc_name, request.signal_name, request.value)
-        elif request.plc_type == "viltor_comp":
-            logger.info(f"Viltor Request: {request}")
-            success = viltor_comp_writer.viltor_write_signal(request.plc_name, request.signal_name, request.value)
-        elif request.plc_type == "plc":
-            success = plc_writer.plc_write_signal(request.plc_name, request.signal_name, request.value)
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid PLC type: {request.plc_type}")
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to write signal.")
-        
-        return {"message": f"Successfully wrote {request.value} to {request.signal_name} on {request.plc_name}"}
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error in write_signal endpoint: {e}")
-        raise HTTPException(status_code=500, detail="An internal error occurred.")
-
-
-def trigger_alarm(comp_name, suction_pressure):
-    logger.warning(f"ALARM TRIGGERED: {comp_name} - Suction Pressure: {suction_pressure}")
-    # Play sound or send a notification
-    pygame.mixer.init()
-    pygame.mixer.music.load("static/sounds/high_suction_pressure_alarm.wav")
-    pygame.mixer.music.play()
-
-# A global variable to track the alarm thread
 alarm_thread = None
-
-# Lock to ensure only one alarm thread runs at a time
 alarm_thread_lock = threading.Lock()
-
-# A global set to track active alarms and avoid re-triggering for the same point
+alarm_processor_thread = None
 active_alarms = set()
 
 def process_alarm_queue():
+    """Continuously processes the alarm queue and plays alarms."""
     while not alarm_queue.empty():
         try:
-            # Fetch the next alarm from the queue
             point_name, value, threshold_type = alarm_queue.get()
             alarm_worker(point_name, value, threshold_type)
-
         except Exception as e:
             logger.error(f"Error processing alarm queue: {e}")
-
         finally:
-            # Mark the alarm as processed
             active_alarms.discard(point_name)
             logger.info(f"Finished processing alarm for {point_name}.")
 
+
 def alarm_worker(point_name, value, threshold_type):
+    """
+    Creates an audio file, plays it, and deletes it after playback.
+    :param point_name: Name of the alarm point
+    :param value: The threshold-breached value
+    :param threshold_type: 'max' or 'min' threshold breach
+    """
     try:
         rounded_value = round(value)
+        alarm_message = f"Alarm triggered for {point_name}. Value {rounded_value} has breached the {threshold_type} threshold."
 
-        # Fetch audio file name from the data point configuration
-        data_point = data_monitor_map.get(point_name, {})
-        #logger.info(f"Data Point: {data_point}")
-        audio_file_key = f"{threshold_type}_audio"
-        #logger.info(f"Audio File Key: {audio_file_key}")
-        audio_file_name = data_point.get(audio_file_key)
-        #logger.info(f"Audio File Name: {audio_file_name}")
-        if not audio_file_name:
-            logger.warning(f"No audio file specified for {point_name} ({threshold_type} breach). Skipping alarm.")
-            return
+        # Generate alarm audio file
+        audio_file = f"static/sounds/{point_name}_{threshold_type}.mp3"
+        tts = gTTS(text=alarm_message, lang="en")
+        tts.save(audio_file)
 
-        audio_file = f"static/sounds/{audio_file_name}.mp3"
+        logger.warning(alarm_message)
+        logger.info(f"Generated alarm audio: {audio_file}")
 
-        if not os.path.exists(audio_file):
-            logger.error(f"Audio file not found: {audio_file}. Cannot play alarm.")
-            return
-
-        logger.warning(f"Alarm triggered for {point_name}. Value {rounded_value} has breached the {threshold_type} threshold.")
-        
         # Initialize pygame mixer
         pygame.mixer.init()
         pygame.mixer.music.load(audio_file)
@@ -887,13 +1206,18 @@ def alarm_worker(point_name, value, threshold_type):
         start_time = time.time()
         while pygame.mixer.music.get_busy():
             if time.time() - start_time > 10:
-                logger.warning(f"Audio playback for {point_name} timed out after 5 seconds.")
+                logger.warning(f"Audio playback for {point_name} timed out after 10 seconds.")
                 pygame.mixer.music.stop()
                 break
             pygame.time.Clock().tick(10)
 
         pygame.mixer.music.stop()
         logger.info(f"Stopping alarm audio: {audio_file}")
+
+        # Delete the generated audio file
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
+            logger.info(f"Deleted alarm audio file: {audio_file}")
 
     except Exception as e:
         logger.error(f"Error in alarm worker: {e}")
@@ -903,7 +1227,12 @@ def alarm_worker(point_name, value, threshold_type):
 
 
 def trigger_alarm(point_name, value, threshold_type):
-    # Check if the alarm is already active
+    """
+    Triggers an alarm for a monitored point.
+    :param point_name: Name of the alarm point
+    :param value: The threshold-breached value
+    :param threshold_type: 'max' or 'min' threshold breach
+    """
     if point_name in active_alarms:
         logger.info(f"Alarm for {point_name} is already active. Skipping re-trigger.")
         return
