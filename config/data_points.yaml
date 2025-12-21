@@ -20,6 +20,12 @@ data_points:
               address: 40136
               description: Temperature
               type: REAL
+              process: COLD
+              monitor: 0
+              max: 4
+              min: -1
+              max_audio:
+              min_audio:
             COLD_STORE1_TEMP_MAX:
               address: 40248
               description: Temp MAX
@@ -63,6 +69,10 @@ data_points:
               address: 40138
               description: Temperature
               type: REAL
+              process: COLD
+              monitor: 1
+              max: 15
+              min: 9
             COLD_STORE2_TEMP_MAX:
               address: 40252
               description: Temp MAX
@@ -91,7 +101,7 @@ data_points:
               description: Temperature
               type: REAL
               process: COLD
-              monitor: 1
+              monitor: 0
               max: 4
               min: -1
             ANTE_ROOM_TEMP_MAX:
@@ -1272,7 +1282,7 @@ data_points:
                 description: Control Status
                 type: DIGITAL                  
     frozen_rooms:
-      chamber_V:
+      chamber_v:
         acu_unit_1:
           read:
             AC_UNIT_1_FZN_RM_6_RUN_HR:
@@ -1611,7 +1621,7 @@ data_points:
               process: FROZEN
               monitor: 0
               min: -24
-              max: -16
+              max: -15
               max_audio: iqf_suction_pressure_breach_max
             FROZN_ROOM1_TEMP_MAX:
               address: 40214
@@ -1796,7 +1806,7 @@ data_points:
               type: REAL
               process: FROZEN
               monitor: 0
-              max: -16
+              max: -15
               min: -24
               max_audio: 
             FROZN_ROOM2_TEMP_MAX:
@@ -1978,7 +1988,7 @@ data_points:
               type: REAL
               process: FROZEN
               monitor: 1
-              max: -16
+              max: -15
               min: -24
               max_audio: 
             FROZN_ROOM3_TEMP_MAX:
@@ -2150,7 +2160,7 @@ data_points:
               type: REAL
               process: FROZEN
               monitor: 0
-              max: -16
+              max: -15
               min: -24
               max_audio: 
             FROZN_ROOM4_TEMP_MAX:
@@ -2321,8 +2331,8 @@ data_points:
               description: Temperature
               type: REAL
               process: FROZEN
-              monitor: 1
-              max: -16
+              monitor: 0
+              max: -15
               min: -24
             FROZN_ROOM5_TEMP_MAX:
               address: 40230

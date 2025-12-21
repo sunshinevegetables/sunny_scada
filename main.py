@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
-
+import re
 import queue
 
 # Queue to store alarm details
@@ -467,11 +467,59 @@ def map_condensers_to_control_status():
             return {}
 
         logger.debug("Successfully created condenser control status map.")
+        logger.info(f"Condenser Control Map: {condenser_control_map}")
         return condenser_control_map
 
     except Exception as e:
         logger.error(f"Error creating condenser control status map: {e}")
         return {}
+
+def map_viltor_compressor_suction_pressure():
+    """
+    Maps Viltor compressor names to their suction pressure data, including address and current values.
+
+    :return: A dictionary where keys are compressor names and values are their suction pressure readings.
+    """
+    try:
+        # Fetch data from storage
+        data = storage.get_data()
+
+        if not data:
+            logger.warning("No data available in storage.")
+            return {}
+
+        # Initialize dictionary to store compressor suction pressure data
+        suction_pressure_map = {}
+
+        # Traverse the data structure
+        for plc_name, plc_data in data.items():
+            viltor_section = plc_data.get("data", {}).get("viltor_comp", {})  # Assuming "viltor_comp" holds Viltor compressors
+            for comp_name, comp_data in viltor_section.items():
+                read_data = comp_data.get("read", {})
+                suction_pressure_data = read_data.get("SUCTION_PRESSURE", {})
+
+                # Extract suction pressure value and description
+                suction_pressure_value = suction_pressure_data.get("scaled_value")  # Assuming it's a REAL value
+                description = suction_pressure_data.get("description")
+
+                if suction_pressure_value is not None and description is not None:
+                    full_comp_name = f"{plc_name}_viltor_{comp_name}_SUCTION_PRESSURE"
+                    suction_pressure_map[full_comp_name] = {
+                        "description": description,
+                        "suction_pressure": suction_pressure_value,
+                    }
+
+        if not suction_pressure_map:
+            logger.warning("No Viltor compressor suction pressure data found.")
+            return {}
+
+        logger.debug("Successfully created Viltor compressor suction pressure map.")
+        return suction_pressure_map
+
+    except Exception as e:
+        logger.error(f"Error creating Viltor compressor suction pressure map: {e}")
+        return {}
+
 
 def map_compressors_to_status():
     """
@@ -695,7 +743,7 @@ def update_cold_storage_map(interval=1):
 
             # Refresh the monitored temperature data map
             cold_storage_map = map_cold_storage_temps()
-            
+            logger.info(f"Cold Storage Map: {cold_storage_map}")
             if not cold_storage_map:
                 logger.warning("No cold storage data points available. Retrying...")
                 time.sleep(interval)
@@ -710,6 +758,7 @@ def update_cold_storage_map(interval=1):
                     if max_value is not None and scaled_value > max_value:
                         logger.warning(f"ALARM: {point_name} exceeds max value: {scaled_value} > {max_value}")
                         trigger_alarm(point_name, scaled_value, "max")
+                        #start_cooling();
                     if min_value is not None and scaled_value < min_value:
                         logger.warning(f"ALARM: {point_name} below min value: {scaled_value} < {min_value}")
                         trigger_alarm(point_name, scaled_value, "min")
@@ -829,7 +878,6 @@ def update_data_monitor_map(interval=1):
             logger.error(f"Error in data monitor map check: {e}")
 
 
-
 @app.post("/start_iqf", summary="Start IQF Monitoring", description="Start monitoring PLC data for threshold breaches.")
 def start_iqf():
     global monitoring_thread
@@ -862,7 +910,7 @@ def start_iqf():
 
         logger.info("Condenser 1 turned on and reset successfully. Verifying status...")
 
-        time.sleep(10)
+        time.sleep(15)
         # Check if condenser pump and fans are on
         client = plc_reader.clients.get("Main PLC")
         if not client:
@@ -895,20 +943,20 @@ def start_iqf():
     
    
     # Wait before checking the compressor status
-    time.sleep(10)
+    time.sleep(15)
 
     if not compressor_status_map:
         raise HTTPException(status_code=400, detail="No compressor status data available.")
     logger.info(f"Compressor Status Map: {compressor_status_map}")
 
     # Check if Compressor 1 is ON
-    comp1_key = "MainPLC_screw_COMP_1_STATUS_2"
+    comp1_key = "MainPLC_screw_COMP_2_STATUS_2"
     is_comp1_on = compressor_status_map.get(comp1_key, {}).get("Running", 0)
 
     if is_comp1_on:
-        logger.info("Compressor 1 is already ON.")
+        logger.info("Compressor 2 is already ON.")
     else:
-        logger.info("Compressor 1 is OFF. Attempting to turn it on.")
+        logger.info("Compressor 2 is OFF. Attempting to turn it on.")
 
         # Get the Modbus client for the PLC
         client = plc_reader.clients.get("Main PLC")
@@ -924,6 +972,7 @@ def start_iqf():
                 raise HTTPException(status_code=500, detail="Failed to turn on Compressor 1 (first operation).")
 
             logger.info("Successfully set bit 0 to 1 for Compressor 1. Now resetting bit 0 to 0.")
+            time.sleep(2)
 
             # Perform the second write operation: reset bit 0 to 0
             success_second = plc_writer.bit_write_signal(client, 41340, 0, 0)
@@ -933,6 +982,26 @@ def start_iqf():
 
             logger.info("Compressor 1 turned on and reset successfully.")
 
+            # Now, bring the compressor ON LOAD
+            logger.info("Bringing Compressor 2 on LOAD...")
+
+            # Set bit 3 to 1 for COMP_2_WR (On Load)
+            success_load_on = plc_writer.bit_write_signal(client, 41340, 3, 1)
+            if not success_load_on:
+                logger.error("Failed to set bit 3 to 1 for COMP_2_WR.")
+                raise HTTPException(status_code=500, detail="Failed to bring Compressor 1 on load.")
+
+            logger.info("Successfully set bit 3 to 1 for COMP_2_WR. Waiting for 10 seconds...")
+            time.sleep(10)
+
+            # Reset bit 3 to 0 for COMP_2_WR (Off Load)
+            success_load_off = plc_writer.bit_write_signal(client, 41340, 3, 0)
+            if not success_load_off:
+                logger.error("Failed to reset bit 3 to 0 for COMP_2_WR.")
+                raise HTTPException(status_code=500, detail="Failed to reset Compressor 1 on load operation.")
+
+            logger.info("Compressor 1 is now ON LOAD and reset successfully.")
+
         except Exception as e:
             logger.error(f"Error while processing Compressor 1 operations: {e}")
             raise HTTPException(status_code=500, detail="An error occurred while managing Compressor 1.")
@@ -940,7 +1009,12 @@ def start_iqf():
 
 
     # Wait before checking the compressor status
-    time.sleep(10)
+    time.sleep(15)
+    
+    # load the compressor 2
+
+
+    time.sleep(15)
 
     # Fetch compressor control map
     compressor_status_map = map_compressors_to_status()
@@ -1159,6 +1233,121 @@ def bit_write_signal(request: BitWriteSignalRequest):
         logger.error(f"Error in bit_write_signal endpoint: {e}")
         raise HTTPException(status_code=500, detail="An internal error occurred.")
 
+
+def start_cooling():
+    # Fetch condenser control map and compressor suction pressures
+    condenser_control_map = map_condensers_to_control_status()
+    compressor_status_map = map_viltor_compressor_suction_pressure()
+
+    if not condenser_control_map:
+        raise HTTPException(status_code=400, detail="No condenser control status data available.")
+    
+    logger.info(f"Condenser Control Map: {condenser_control_map}")
+
+    # Check if any condenser is on before starting the IQF process
+    condenser_on = any(details["Pump On"] for details in condenser_control_map.values())
+    if not condenser_on:
+        logger.info("No condenser is currently on. Attempting to turn on condenser 1.")
+
+        client = plc_writer.clients.get("Main PLC")
+        if not client:
+            logger.error("No Modbus client found for PLC 'Main PLC'.")
+            raise HTTPException(status_code=500, detail="Failed to control condenser (no client available).")
+
+        # Turn on Condenser 1
+        success_first = plc_writer.bit_write_signal(client, 42022, 0, 1)
+        if not success_first:
+            logger.error("Failed to set bit 0 to 1 for Condenser 1.")
+            raise HTTPException(status_code=500, detail="Failed to turn on Condenser 1 (first operation).")
+
+        logger.info("Successfully set bit 0 to 1 for Condenser 1. Now resetting bit 0 to 0.")
+
+        time.sleep(2)
+
+        # Reset bit to 0
+        success_second = plc_writer.bit_write_signal(client, 42022, 0, 0)
+        if not success_second:
+            logger.error("Failed to reset bit 0 to 0 for Condenser 1.")
+            raise HTTPException(status_code=500, detail="Failed to reset Condenser 1 (second operation).")
+
+        logger.info("Condenser 1 turned on and reset successfully. Verifying status...")
+
+        time.sleep(15)
+
+        # Verify Condenser 1 is On
+        bit_status = plc_reader.read_data_point(
+            client,
+            point_name="Condenser 1 Pump Status",
+            point_details={
+                "address": 42022,
+                "type": "DIGITAL",
+                "description": "Pump On Status",
+                "bits": {"BIT 9": "PUMP ON"}
+            },
+        )
+
+        if not bit_status:
+            logger.error("Condenser 1 failed to turn on.")
+            raise HTTPException(status_code=500, detail="Condenser 1 did not start successfully.")
+
+    logger.info("Condenser 1 is running. Proceeding to check compressors.")
+
+    # Check if Viltor Compressor 2 or 3 is ON
+    viltor_comp_2 = compressor_status_map.get("MainPLC_viltor_COMP_2_SUCTION_PRESSURE", {}).get("suction_pressure", 0)
+    viltor_comp_3 = compressor_status_map.get("MainPLC_viltor_COMP_3_SUCTION_PRESSURE", {}).get("suction_pressure", 0)
+
+    if viltor_comp_2 > 0 or viltor_comp_3 > 0:
+        logger.info("At least one Viltor compressor (2 or 3) is already running.")
+    else:
+        logger.info("Viltor Compressor 2 is OFF. Attempting to turn it on.")
+
+        client = plc_writer.clients.get("Main PLC")
+        if not client:
+            logger.error("No Modbus client found for PLC 'Main PLC'.")
+            raise HTTPException(status_code=500, detail="Failed to turn on Compressor 2 (no client available).")
+
+        # Turn on Viltor Compressor 2 (Set bit 0 to 1)
+        success_first = plc_writer.bit_write_signal(client, 41340, 0, 1)
+        if not success_first:
+            logger.error("Failed to set bit 0 to 1 for Viltor Compressor 2.")
+            raise HTTPException(status_code=500, detail="Failed to turn on Viltor Compressor 2 (first operation).")
+
+        logger.info("Successfully set bit 0 to 1 for Viltor Compressor 2. Now resetting bit 0 to 0.")
+
+        time.sleep(2)
+
+        # Reset bit to 0
+        success_second = plc_writer.bit_write_signal(client, 41340, 0, 0)
+        if not success_second:
+            logger.error("Failed to reset bit 0 to 0 for Viltor Compressor 2.")
+            raise HTTPException(status_code=500, detail="Failed to reset Viltor Compressor 2 (second operation).")
+
+        logger.info("Viltor Compressor 2 turned on and reset successfully.")
+
+        # **Bring Viltor Compressor 2 ON LOAD**
+        logger.info("Bringing Viltor Compressor 2 ON LOAD...")
+
+        # Write bit 3 = 1 at COMP_2_WR
+        success_load = plc_writer.bit_write_signal(client, 41341, 3, 1)  # Assuming COMP_2_WR = 41341
+        if not success_load:
+            logger.error("Failed to set bit 3 to 1 for Compressor 2 ON LOAD.")
+            raise HTTPException(status_code=500, detail="Failed to load Viltor Compressor 2 (first operation).")
+
+        logger.info("Successfully set bit 3 to 1. Waiting 10 seconds before reset...")
+        time.sleep(2)
+
+        # Reset bit 3 = 0
+        success_reset = plc_writer.bit_write_signal(client, 41341, 3, 0)
+        if not success_reset:
+            logger.error("Failed to reset bit 3 to 0 for Compressor 2 ON LOAD.")
+            raise HTTPException(status_code=500, detail="Failed to reset Viltor Compressor 2 after loading.")
+
+        logger.info("Viltor Compressor 2 successfully brought ON LOAD and reset.")
+
+
+
+
+
 alarm_thread = None
 alarm_thread_lock = threading.Lock()
 alarm_processor_thread = None
@@ -1186,10 +1375,13 @@ def alarm_worker(point_name, value, threshold_type):
     """
     try:
         rounded_value = round(value)
-        alarm_message = f"Alarm triggered for {point_name}. Value {rounded_value} has breached the {threshold_type} threshold."
+        
 
         # Generate alarm audio file
         audio_file = f"static/sounds/{point_name}_{threshold_type}.mp3"
+        # Replace underscores with spaces
+        formatted_point_name = re.sub(r'_', ' ', point_name)
+        alarm_message = f"Alarm triggered for {formatted_point_name}. Value {rounded_value} has breached the {threshold_type} threshold."
         tts = gTTS(text=alarm_message, lang="en")
         tts.save(audio_file)
 
