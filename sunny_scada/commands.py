@@ -1,4 +1,4 @@
-from plc_writer import PLCWriter
+from .plc_writer import PLCWriter
 
 class Commands:
     def __init__(self, plc_writer):

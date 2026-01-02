@@ -1,0 +1,952 @@
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_6_RUN_HR:
+              address: 43074
+              description: Running Hours
+              type: REAL
+            FRZN_ROOM6_DFRST_LLSV_CLS_TIME:
+              address: 41674
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM6_HGSV_ON_TIME:
+              address: 41677
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM6_HGSV_ON_TIME_ACT_TIME:
+              address: 41678
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM6_DFST_LLSV_CLS_ACT_TIM:
+              address: 41672
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+              process: Test
+              monitor: 1
+          write:
+            FRO_STORE6_ACU_1_CTRL_STS:
+              address: 42014
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+              address: 42082
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+              address: 42084
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_6_CTRL_STS:
+              address: 42080
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_2_FZN_RM_6_RUN_HR:
+              address: 43076
+              description: Running Hours
+              type: REAL
+            FRZN_ROOM6_DFRST_LLSV_CLS_TIME:
+              address: 41674
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM6_HGSV_ON_TIME:
+              address: 41677
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM6_HGSV_ON_TIME_ACT_TIME:
+              address: 41678
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM6_DFST_LLSV_CLS_ACT_TIM:
+              address: 41672
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE6_ACU_2 _CTRL_STS:
+              address: 42014
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+              address: 42082
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_6_CTRL_STS:
+              address: 42084
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_6_CTRL_STS:
+              address: 42080
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+
+
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_1_RUN_HR:
+              address: 43054
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                1
+              type: REAL
+            FRN_RM1_DFRT_FAN_UNT_OFF_ACT_TIM:
+              address: 40545
+              description: Defrost Fan Unit Off Actual Time
+              type: INTEGER
+            FROZN_ROOM1_TEMP_HIGH_SP:
+              acu_unit_1: null
+              address: 40562
+              description: High Temperature Set Point
+              type: INTEGER
+            FROZN_ROOM1_TEMP_LOW_SP:
+              address: 40560
+              description: Low Temperature Set Point
+              type: INTEGER
+            FRZN_ROM1_DFRST_LLSV_ON_TIME:
+              address: 40551
+              description: Defrost LLSV On Time
+              type: INTEGER
+            FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
+              address: 40542
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM1_DFRST_PUMP_ON_TIME:
+              address: 40548
+              description: Defrost Pump On Time
+              type: INTEGER
+            FRZN_ROOM1_DFRT_FAN_UNT_OFF_TIM:
+              address: 40544
+              description: Defrost Fan Unit Off Time
+              type: INTEGER
+            FRZN_ROOM1_HGSV_ON_TIME:
+              address: 40550
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM1_HGSV_ON_TIME_ACT_TIME:
+              address: 40547
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM1_DFST_LLSV_CLS_ACT_TIM:
+              address: 40543
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE1_ACU_1_CTRL_STS:
+              address: 42000
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 1
+              type: INTEGER
+            HSV_AC_UT_1_2_FZN_RM_1_CTRL_STS:
+              address: 42054
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_1_CTRL_STS:
+              address: 42056
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LLSV_AC_UNIT_1_2_FRN_RM_1_CTRL_STS:
+              address: 42052
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LLSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_2_FZN_RM_1_RUN_HR:
+              address: 43056
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                1
+              type: REAL
+            FRN_RM1_DFRT_FAN_UNT_OFF_ACT_TIM:
+              address: 40545
+              description: Defrost Fan Unit Off Actual Time
+              type: INTEGER
+            FROZN_ROOM1_TEMP_HIGH_SP:
+              address: 40562
+              description: High Temperature Set Point
+              type: INTEGER
+            FROZN_ROOM1_TEMP_LOW_SP:
+              address: 40560
+              description: Low Temperature Set Point
+              type: INTEGER
+            FRZN_ROM1_DFRST_LLSV_ON_TIME:
+              address: 40551
+              description: Defrost LLSV On Time
+              type: INTEGER
+            FRZN_ROOM1_DFRST_LLSV_CLS_TIME:
+              address: 40542
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM1_DFRST_PUMP_ON_TIME:
+              address: 40548
+              description: Defrost Pump On Time
+              type: INTEGER
+            FRZN_ROOM1_DFRT_FAN_UNT_OFF_TIM:
+              address: 40544
+              description: Defrost Fan Unit Off Time
+              type: INTEGER
+            FRZN_ROOM1_HGSV_ON_TIME:
+              address: 40550
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM1_HGSV_ON_TIME_ACT_TIME:
+              address: 40547
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM1_DFST_LLSV_CLS_ACT_TIM:
+              address: 40543
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE1_ACU_2_CTRL_STS:
+              address: 42004
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_2_RUN_HR:
+              address: 43058
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                2
+              type: REAL
+            AC_UNIT_2_FZN_RM_2_RUN_HR:
+              address: 43060
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                2
+              type: REAL
+            FROZN_ROOM3_TEMP:
+              address: 40050
+              description: Temperature
+              type: INTEGER
+            FRZN_ROOM2_DFRST_LLSV_CLS_TIME:
+              address: 41612
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM2_HGSV_ON_TIME:
+              address: 41616
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM2_HGSV_ON_TIME_ACT_TIME:
+              address: 41617
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM2_DFST_LLSV_CLS_ACT_TIM:
+              address: 41613
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE2_ACU_1_CTRL_STS:
+              address: 42005
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 1
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+              address: 42060
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+              address: 42062
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_2_CTRL_STS:
+              address: 42058
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_1_FZN_RM_2_RUN_HR:
+              address: 43058
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                2
+              type: REAL
+            AC_UNIT_2_FZN_RM_2_RUN_HR:
+              address: 43060
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                2
+              type: REAL
+            FRZN_ROOM2_DFRST_LLSV_CLS_TIME:
+              address: 41612
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM2_HGSV_ON_TIME:
+              address: 41616
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM2_HGSV_ON_TIME_ACT_TIME:
+              address: 41617
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM2_DFST_LLSV_CLS_ACT_TIM:
+              address: 41613
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE2_ACU_2_CTRL_STS:
+              address: 42006
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+              address: 42060
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_2_CTRL_STS:
+              address: 42062
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_2_CTRL_STS:
+              address: 42058
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_3_RUN_HR:
+              address: 43062
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                3
+              type: REAL
+            AC_UNIT_2_FZN_RM_3_RUN_HR:
+              address: 43064
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                3
+              type: REAL
+            FRZN_ROOM3_DFRST_LLSV_CLS_TIME:
+              address: 41626
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM3_HGSV_ON_TIME:
+              address: 41633
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM3_HGSV_ON_TIME_ACT_TIME:
+              address: 41634
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM3_DFST_LLSV_CLS_ACT_TIM:
+              address: 41627
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE3_ACU_1_CTRL_STS:
+              address: 42007
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 1
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+              address: 42066
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+              address: 42068
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_3_CTRL_STS:
+              address: 42064
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_1_FZN_RM_3_RUN_HR:
+              address: 43062
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                3
+              type: REAL
+            AC_UNIT_2_FZN_RM_3_RUN_HR:
+              address: 43064
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                3
+              type: REAL
+            FRZN_ROOM3_DFRST_LLSV_CLS_TIME:
+              address: 41626
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM3_HGSV_ON_TIME:
+              address: 41633
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM3_HGSV_ON_TIME_ACT_TIME:
+              address: 41634
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM3_DFST_LLSV_CLS_ACT_TIM:
+              address: 41627
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE3_ACU_2_CTRL_STS:
+              address: 42008
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+              address: 42066
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_3_CTRL_STS:
+              address: 42068
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_3_CTRL_STS:
+              address: 42064
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_4_RUN_HR:
+              address: 43066
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                4
+              type: REAL
+            FRZN_ROOM4_DFRST_LLSV_CLS_TIME:
+              address: 41642
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM4_HGSV_ON_TIME:
+              address: 41646
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM4_HGSV_ON_TIME_ACT_TIME:
+              address: 41647
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM4_DFST_LLSV_CLS_ACT_TIM:
+              address: 41643
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE4_ACU_1_CTRL_STS:
+              address: 42009
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 1
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+              address: 42070
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+              address: 42072
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_4_CTRL_STS:
+              address: 42071
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_2_FZN_RM_4_RUN_HR:
+              address: 43068
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                4
+              type: REAL
+            FRZN_ROOM4_DFRST_LLSV_CLS_TIME:
+              address: 41642
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM4_HGSV_ON_TIME:
+              address: 41646
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM4_HGSV_ON_TIME_ACT_TIME:
+              address: 41647
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM4_DFST_LLSV_CLS_ACT_TIM:
+              address: 41643
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE4_ACU_2_CTRL_STS:
+              address: 42010
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+              address: 42070
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_4_CTRL_STS:
+              address: 42072
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_4_CTRL_STS:
+              address: 42071
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+
+acu_unit_1:
+          read:
+            AC_UNIT_1_FZN_RM_5_RUN_HR:
+              address: 43070
+              description: Running Hours for Air Conditioning Unit 1 in Frozen Room
+                5
+              type: REAL
+            FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
+              address: 41658
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM5_HGSV_ON_TIME:
+              address: 41662
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM5_HGSV_ON_TIME_ACT_TIME:
+              address: 41663
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM5_DFST_LLSV_CLS_ACT_TIM:
+              address: 41659
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE5_ACU_1_CTRL_STS:
+              address: 42013
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 1
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+              address: 42076
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+              address: 42078
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_5_CTRL_STS:
+              address: 42074
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
+        acu_unit_2:
+          read:
+            AC_UNIT_2_FZN_RM_5_RUN_HR:
+              address: 43072
+              description: Running Hours for Air Conditioning Unit 2 in Frozen Room
+                5
+              type: REAL
+            FRZN_ROOM5_DFRST_LLSV_CLS_TIME:
+              address: 41658
+              description: Defrost LLSV Close Time
+              type: INTEGER
+            FRZN_ROOM5_HGSV_ON_TIME:
+              address: 41662
+              description: HGSV On Time
+              type: INTEGER
+            FRZN_ROOM5_HGSV_ON_TIME_ACT_TIME:
+              address: 41663
+              description: HGSV On Actual Time
+              type: INTEGER
+            FZN_ROOM5_DFST_LLSV_CLS_ACT_TIM:
+              address: 41659
+              description: Defrost LLSV Close Actual Time
+              type: INTEGER
+          write:
+            FRO_STORE5_ACU_2_CTRL_STS:
+              address: 42014
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 13: MANUAL
+                BIT 2: AUTO
+                BIT 4: RESET
+                BIT 5: FAN-1 RUN FB
+                BIT 7: FAN-2 RUN FB
+              description: Control Status AC Unit 2
+              type: DIGITAL
+            HSV_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+              address: 42076
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control HSV Unit 1 and 2
+              type: DIGITAL
+            ICLX_AC_UT_1_2_FZN_RM_5_CTRL_STS:
+              address: 42078
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control ICLX Unit 1 and 2
+              type: DIGITAL
+            LSV_AC_UT_1_2_FRN_RM_5_CTRL_STS:
+              address: 42074
+              bits:
+                BIT 0: START
+                BIT 1: STOP
+                BIT 12: FAIL TO START
+                BIT 2: AUTO/MANUAL
+                BIT 4: RESET
+                BIT 6: PUMP TRIP
+                BIT 7: LOCAL/REMOTE
+                BIT 9: PUMP ON
+              description: Control LSV Unit 1 and 2
+              type: DIGITAL
