@@ -26,6 +26,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 
+# Initialize DB schema (recommended)
+alembic upgrade head
+
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -42,6 +45,19 @@ Then open: `http://localhost:8000/`
 | `MODBUS_MAX_BLOCK_SIZE` | `120` | max registers per block read (typical devices support up to 125) |
 | `MODBUS_MAX_GAP` | `2` | allow small holes when merging reads |
 | `DEFAULT_PLC_NAME` | `Main PLC` | fallback PLC name for legacy write calls |
+| `DATABASE_URL` | `sqlite:///./sunny_scada.db` | SQLAlchemy database URL |
+| `AUTO_CREATE_DB` | `0` | dev/test escape hatch to create tables without Alembic |
+| `JWT_SECRET_KEY` | **required** | JWT signing secret (do not commit) |
+| `INITIAL_ADMIN_PASSWORD` | **required on first run** | bootstrap admin user password |
+| `DIGITAL_BIT_MAX` | `15` | max bit index allowed for DIGITAL datapoint bit labels |
+
+## System config module (DB-backed)
+
+Authenticated users with `config:read`/`config:write` can CRUD PLCs, containers, equipment, and datapoints under:
+
+- `/api/config/*`
+
+See `docs/SYSTEM_CONFIG_API.md` for endpoints and example payloads.
 
 ## Notes about Modbus addressing
 

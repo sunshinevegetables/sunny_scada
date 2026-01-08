@@ -1,3 +1,33 @@
-from . import processes, data_points, plc, iqf, health
+from . import (
+    processes,
+    data_points,
+    plc,
+    iqf,
+    health,
+    auth,
+    config_admin,
+    commands,
+    logs,
+    alarms,
+    admin,
+    maintenance,
+    trends,
+    system_config,
+)
 
-__all__ = ["processes", "data_points", "plc", "iqf", "health"]
+__all__ = [
+    "processes",
+    "data_points",
+    "plc",
+    "iqf",
+    "health",
+    "auth",
+    "config_admin",
+    "commands",
+    "logs",
+    "alarms",
+    "admin",
+    "maintenance",
+    "trends",
+    "system_config",
+]

@@ -1,0 +1,933 @@
+from __future__ import annotations
+
+import datetime as dt
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from sunny_scada.api.deps import get_db, get_current_user, require_permission, get_audit_service
+from sunny_scada.db.models import (
+    Breakdown,
+    Equipment,
+    InventoryTransaction,
+    SparePart,
+    Schedule,
+    TaskTemplate,
+    Vendor,
+    WorkOrder,
+)
+
+router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+# ---------- Vendors ----------
+
+
+class VendorIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/vendors")
+def create_vendor(
+    req: VendorIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    if db.query(Vendor).filter(Vendor.name == req.name).first():
+        raise HTTPException(status_code=400, detail="vendor exists")
+    v = Vendor(name=req.name, phone=req.phone, email=req.email, notes=req.notes, meta=req.meta)
+    db.add(v)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.vendor.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=req.name, metadata={"id": v.id})
+    except Exception:
+        pass
+    return {"id": v.id, "name": v.name}
+
+
+@router.get("/vendors")
+def list_vendors(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    vs = db.query(Vendor).order_by(Vendor.id.asc()).all()
+    return [{"id": v.id, "name": v.name, "phone": v.phone, "email": v.email, "notes": v.notes, "meta": v.meta} for v in vs]
+
+
+@router.get("/vendors/{vendor_id}")
+def get_vendor(
+    vendor_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    v = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not v:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": v.id, "name": v.name, "phone": v.phone, "email": v.email, "notes": v.notes, "meta": v.meta}
+
+
+@router.put("/vendors/{vendor_id}")
+def update_vendor(
+    vendor_id: int,
+    req: VendorIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    v = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not v:
+        raise HTTPException(status_code=404, detail="Not found")
+    v.name = req.name
+    v.phone = req.phone
+    v.email = req.email
+    v.notes = req.notes
+    v.meta = req.meta
+    db.add(v)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.vendor.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=v.name, metadata={"id": v.id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.delete("/vendors/{vendor_id}")
+def delete_vendor(
+    vendor_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    v = db.query(Vendor).filter(Vendor.id == vendor_id).one_or_none()
+    if not v:
+        raise HTTPException(status_code=404, detail="Not found")
+    name = v.name
+    db.delete(v)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.vendor.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=name, metadata={"id": vendor_id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+# ---------- Equipment ----------
+
+
+class EquipmentIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    location: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = None
+    vendor_id: Optional[int] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/equipment")
+def create_equipment(
+    req: EquipmentIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    eq = Equipment(equipment_code="", name=req.name, location=req.location, description=req.description, vendor_id=req.vendor_id, is_active=True, meta=req.meta)
+    db.add(eq)
+    db.flush()
+    eq.equipment_code = f"EQ-{eq.id:06d}"
+    db.add(eq)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.equipment.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=eq.equipment_code, metadata={"id": eq.id})
+    except Exception:
+        pass
+    return {"id": eq.id, "equipment_code": eq.equipment_code}
+
+
+@router.get("/equipment")
+def list_equipment(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    rows = db.query(Equipment).order_by(Equipment.id.asc()).all()
+    return [{"id": e.id, "equipment_code": e.equipment_code, "name": e.name, "location": e.location, "is_active": e.is_active, "vendor_id": e.vendor_id, "meta": e.meta} for e in rows]
+
+
+@router.get("/equipment/{equipment_id}")
+def get_equipment(
+    equipment_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
+    if not e:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": e.id, "equipment_code": e.equipment_code, "name": e.name, "location": e.location, "description": e.description, "vendor_id": e.vendor_id, "is_active": e.is_active, "meta": e.meta}
+
+
+@router.put("/equipment/{equipment_id}")
+def update_equipment(
+    equipment_id: int,
+    req: EquipmentIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
+    if not e:
+        raise HTTPException(status_code=404, detail="Not found")
+    e.name = req.name
+    e.location = req.location
+    e.description = req.description
+    e.vendor_id = req.vendor_id
+    e.meta = req.meta
+    db.add(e)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.equipment.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=e.equipment_code, metadata={"id": e.id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.delete("/equipment/{equipment_id}")
+def delete_equipment(
+    equipment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
+    if not e:
+        raise HTTPException(status_code=404, detail="Not found")
+    code = e.equipment_code
+    db.delete(e)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.equipment.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=code, metadata={"id": equipment_id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.get("/equipment/{equipment_id}/history")
+def equipment_history(
+    equipment_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    # Timeline: breakdowns, work orders, inventory transactions
+    breakdowns = db.query(Breakdown).filter(Breakdown.equipment_id == equipment_id).order_by(Breakdown.ts.desc()).all()
+    work_orders = db.query(WorkOrder).filter(WorkOrder.equipment_id == equipment_id).order_by(WorkOrder.created_at.desc()).all()
+
+    return {
+        "breakdowns": [
+            {
+                "id": b.id,
+                "ts": b.ts,
+                "description": b.description,
+                "severity": b.severity,
+                "resolved": b.resolved,
+                "resolved_at": b.resolved_at,
+            }
+            for b in breakdowns
+        ],
+        "work_orders": [
+            {
+                "id": w.id,
+                "work_order_code": w.work_order_code,
+                "status": w.status,
+                "priority": w.priority,
+                "title": w.title,
+                "created_at": w.created_at,
+                "due_at": w.due_at,
+                "closed_at": w.closed_at,
+            }
+            for w in work_orders
+        ],
+    }
+
+
+# ---------- Spare parts ----------
+
+
+class SparePartIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    vendor_id: Optional[int] = None
+    unit: Optional[str] = Field(default=None, max_length=50)
+    quantity_on_hand: int = 0
+    min_stock: int = 0
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/spare_parts")
+def create_spare_part(
+    req: SparePartIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    sp = SparePart(part_code="", name=req.name, vendor_id=req.vendor_id, unit=req.unit, quantity_on_hand=int(req.quantity_on_hand), min_stock=int(req.min_stock), meta=req.meta)
+    db.add(sp)
+    db.flush()
+    sp.part_code = f"SP-{sp.id:06d}"
+    db.add(sp)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.spare_part.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=sp.part_code, metadata={"id": sp.id})
+    except Exception:
+        pass
+    return {"id": sp.id, "part_code": sp.part_code}
+
+
+@router.get("/spare_parts")
+def list_spare_parts(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    parts = db.query(SparePart).order_by(SparePart.id.asc()).all()
+    return [
+        {
+            "id": p.id,
+            "part_code": p.part_code,
+            "name": p.name,
+            "vendor_id": p.vendor_id,
+            "unit": p.unit,
+            "quantity_on_hand": p.quantity_on_hand,
+            "min_stock": p.min_stock,
+            "meta": p.meta,
+        }
+        for p in parts
+    ]
+
+
+@router.get("/spare_parts/min_stock")
+def min_stock_alerts(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    parts = db.query(SparePart).filter(SparePart.quantity_on_hand <= SparePart.min_stock).all()
+    return [{"id": p.id, "part_code": p.part_code, "name": p.name, "quantity_on_hand": p.quantity_on_hand, "min_stock": p.min_stock} for p in parts]
+
+
+@router.get("/spare_parts/{part_id}")
+def get_spare_part(
+    part_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    p = db.query(SparePart).filter(SparePart.id == part_id).one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": p.id, "part_code": p.part_code, "name": p.name, "vendor_id": p.vendor_id, "unit": p.unit, "quantity_on_hand": p.quantity_on_hand, "min_stock": p.min_stock, "meta": p.meta}
+
+
+@router.put("/spare_parts/{part_id}")
+def update_spare_part(
+    part_id: int,
+    req: SparePartIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    p = db.query(SparePart).filter(SparePart.id == part_id).one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    p.name = req.name
+    p.vendor_id = req.vendor_id
+    p.unit = req.unit
+    p.quantity_on_hand = int(req.quantity_on_hand)
+    p.min_stock = int(req.min_stock)
+    p.meta = req.meta
+    db.add(p)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.spare_part.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=p.part_code, metadata={"id": p.id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.delete("/spare_parts/{part_id}")
+def delete_spare_part(
+    part_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    p = db.query(SparePart).filter(SparePart.id == part_id).one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Not found")
+    code = p.part_code
+    db.delete(p)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.spare_part.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=code, metadata={"id": part_id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+class AdjustRequest(BaseModel):
+    qty_delta: int
+    reason: Optional[str] = Field(default=None, max_length=200)
+    work_order_id: Optional[int] = None
+
+
+@router.post("/spare_parts/{part_id}/adjust")
+def adjust_inventory(
+    part_id: int,
+    req: AdjustRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("inventory:write")),
+):
+    part = db.query(SparePart).filter(SparePart.id == part_id).one_or_none()
+    if not part:
+        raise HTTPException(status_code=404, detail="Not found")
+    part.quantity_on_hand = int(part.quantity_on_hand or 0) + int(req.qty_delta)
+    txn = InventoryTransaction(
+        part_id=part.id,
+        qty_delta=int(req.qty_delta),
+        reason=req.reason,
+        work_order_id=req.work_order_id,
+        user_id=user.id,
+        client_ip=request.client.host if request.client else None,
+    )
+    db.add(part)
+    db.add(txn)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.inventory.adjust", user_id=user.id, client_ip=request.client.host if request.client else None, resource=part.part_code, metadata={"qty_delta": req.qty_delta, "reason": req.reason})
+    except Exception:
+        pass
+
+    return {"status": "ok", "quantity_on_hand": part.quantity_on_hand}
+
+
+# ---------- Breakdowns ----------
+
+
+class BreakdownIn(BaseModel):
+    equipment_id: int
+    description: str
+    severity: str = Field(default="medium", max_length=30)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/breakdowns")
+def create_breakdown(
+    req: BreakdownIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    b = Breakdown(equipment_id=req.equipment_id, description=req.description, severity=req.severity, resolved=False, reported_by_user_id=user.id, client_ip=request.client.host if request.client else None, meta=req.meta)
+    db.add(b)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.breakdown.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=str(req.equipment_id), metadata={"id": b.id})
+    except Exception:
+        pass
+    return {"id": b.id}
+
+
+@router.get("/breakdowns")
+def list_breakdowns(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+    resolved: Optional[bool] = None,
+    limit: int = Query(100, ge=1, le=200),
+):
+    q = db.query(Breakdown)
+    if resolved is not None:
+        q = q.filter(Breakdown.resolved == bool(resolved))
+    rows = q.order_by(Breakdown.ts.desc()).limit(limit).all()
+    return [{"id": b.id, "ts": b.ts, "equipment_id": b.equipment_id, "description": b.description, "severity": b.severity, "resolved": b.resolved} for b in rows]
+
+
+class BreakdownUpdate(BaseModel):
+    resolved: Optional[bool] = None
+
+
+@router.put("/breakdowns/{breakdown_id}")
+def update_breakdown(
+    breakdown_id: int,
+    req: BreakdownUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    b = db.query(Breakdown).filter(Breakdown.id == breakdown_id).one_or_none()
+    if not b:
+        raise HTTPException(status_code=404, detail="Not found")
+    if req.resolved is not None:
+        b.resolved = bool(req.resolved)
+        b.resolved_at = _now() if b.resolved else None
+    db.add(b)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.breakdown.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=str(b.equipment_id), metadata={"id": b.id, "resolved": b.resolved})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+# ---------- Task templates ----------
+
+
+class TaskTemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    checklist: dict[str, Any] = Field(default_factory=dict)
+    estimated_minutes: Optional[int] = None
+
+
+@router.post("/task_templates")
+def create_task_template(
+    req: TaskTemplateIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    if db.query(TaskTemplate).filter(TaskTemplate.name == req.name).first():
+        raise HTTPException(status_code=400, detail="exists")
+    tt = TaskTemplate(name=req.name, description=req.description, checklist=req.checklist, estimated_minutes=req.estimated_minutes)
+    db.add(tt)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.task_template.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=req.name, metadata={"id": tt.id})
+    except Exception:
+        pass
+    return {"id": tt.id}
+
+
+@router.get("/task_templates")
+def list_task_templates(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    rows = db.query(TaskTemplate).order_by(TaskTemplate.id.asc()).all()
+    return [{"id": t.id, "name": t.name, "description": t.description, "checklist": t.checklist, "estimated_minutes": t.estimated_minutes} for t in rows]
+
+
+@router.put("/task_templates/{template_id}")
+def update_task_template(
+    template_id: int,
+    req: TaskTemplateIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    tt = db.query(TaskTemplate).filter(TaskTemplate.id == template_id).one_or_none()
+    if not tt:
+        raise HTTPException(status_code=404, detail="Not found")
+    tt.name = req.name
+    tt.description = req.description
+    tt.checklist = req.checklist
+    tt.estimated_minutes = req.estimated_minutes
+    db.add(tt)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.task_template.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=tt.name, metadata={"id": tt.id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.delete("/task_templates/{template_id}")
+def delete_task_template(
+    template_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    tt = db.query(TaskTemplate).filter(TaskTemplate.id == template_id).one_or_none()
+    if not tt:
+        raise HTTPException(status_code=404, detail="Not found")
+    name = tt.name
+    db.delete(tt)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.task_template.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=name, metadata={"id": template_id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+# ---------- Schedules ----------
+
+
+class ScheduleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    enabled: bool = True
+    cron: Optional[str] = Field(default=None, max_length=200)
+    interval_minutes: Optional[int] = None
+    task_template_id: Optional[int] = None
+    equipment_id: Optional[int] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/schedules")
+def create_schedule(
+    req: ScheduleIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    sch = Schedule(
+        name=req.name,
+        enabled=req.enabled,
+        cron=req.cron,
+        interval_minutes=req.interval_minutes,
+        task_template_id=req.task_template_id,
+        equipment_id=req.equipment_id,
+        next_run_at=_now(),
+        meta=req.meta,
+    )
+    db.add(sch)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.schedule.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=req.name, metadata={"id": sch.id})
+    except Exception:
+        pass
+    return {"id": sch.id}
+
+
+@router.get("/schedules")
+def list_schedules(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    rows = db.query(Schedule).order_by(Schedule.id.asc()).all()
+    return [{"id": s.id, "name": s.name, "enabled": s.enabled, "cron": s.cron, "interval_minutes": s.interval_minutes, "next_run_at": s.next_run_at, "equipment_id": s.equipment_id, "task_template_id": s.task_template_id, "meta": s.meta} for s in rows]
+
+
+@router.put("/schedules/{schedule_id}")
+def update_schedule(
+    schedule_id: int,
+    req: ScheduleIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
+    if not sch:
+        raise HTTPException(status_code=404, detail="Not found")
+    sch.name = req.name
+    sch.enabled = req.enabled
+    sch.cron = req.cron
+    sch.interval_minutes = req.interval_minutes
+    sch.task_template_id = req.task_template_id
+    sch.equipment_id = req.equipment_id
+    sch.meta = req.meta
+    if sch.next_run_at is None:
+        sch.next_run_at = _now()
+    db.add(sch)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.schedule.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=sch.name, metadata={"id": sch.id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+@router.delete("/schedules/{schedule_id}")
+def delete_schedule(
+    schedule_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
+    if not sch:
+        raise HTTPException(status_code=404, detail="Not found")
+    name = sch.name
+    db.delete(sch)
+    db.commit()
+    try:
+        audit.log(db, action="maintenance.schedule.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=name, metadata={"id": schedule_id})
+    except Exception:
+        pass
+    return {"status": "ok"}
+
+
+# ---------- Work orders ----------
+
+
+class WorkOrderIn(BaseModel):
+    equipment_id: Optional[int] = None
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    priority: str = Field(default="normal", max_length=30)
+    assigned_user_id: Optional[int] = None
+    assigned_role_id: Optional[int] = None
+    due_at: Optional[str] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/work_orders")
+def create_work_order(
+    req: WorkOrderIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    due = dt.datetime.fromisoformat(req.due_at.replace("Z", "+00:00")) if req.due_at else None
+    wo = WorkOrder(
+        work_order_code="",
+        equipment_id=req.equipment_id,
+        title=req.title,
+        description=req.description,
+        status="open",
+        priority=req.priority,
+        assigned_user_id=req.assigned_user_id,
+        assigned_role_id=req.assigned_role_id,
+        due_at=due,
+        meta=req.meta,
+    )
+    db.add(wo)
+    db.flush()
+    wo.work_order_code = f"WO-{wo.id:06d}"
+    db.add(wo)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.work_order.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=wo.work_order_code, metadata={"id": wo.id})
+    except Exception:
+        pass
+
+    return {"id": wo.id, "work_order_code": wo.work_order_code}
+
+
+@router.get("/work_orders")
+def list_work_orders(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+    status: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=200),
+):
+    q = db.query(WorkOrder)
+    if status:
+        q = q.filter(WorkOrder.status == status)
+    rows = q.order_by(WorkOrder.created_at.desc()).limit(limit).all()
+    return [{"id": w.id, "work_order_code": w.work_order_code, "equipment_id": w.equipment_id, "status": w.status, "priority": w.priority, "title": w.title, "created_at": w.created_at, "due_at": w.due_at, "assigned_user_id": w.assigned_user_id, "assigned_role_id": w.assigned_role_id} for w in rows]
+
+
+@router.get("/work_orders/{work_order_id}")
+def get_work_order(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
+    if not w:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": w.id, "work_order_code": w.work_order_code, "equipment_id": w.equipment_id, "status": w.status, "priority": w.priority, "title": w.title, "description": w.description, "created_at": w.created_at, "due_at": w.due_at, "assigned_user_id": w.assigned_user_id, "assigned_role_id": w.assigned_role_id, "meta": w.meta}
+
+
+class StatusChange(BaseModel):
+    status: str = Field(min_length=1, max_length=30)
+
+
+_ALLOWED = {
+    "open": {"in_progress", "cancelled"},
+    "in_progress": {"done", "cancelled"},
+    "done": set(),
+    "cancelled": set(),
+}
+
+
+@router.post("/work_orders/{work_order_id}/status")
+def set_work_order_status(
+    work_order_id: int,
+    req: StatusChange,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
+    if not w:
+        raise HTTPException(status_code=404, detail="Not found")
+    new = req.status
+    cur = w.status
+    if new != cur and new not in _ALLOWED.get(cur, set()):
+        raise HTTPException(status_code=400, detail="Invalid status transition")
+    w.status = new
+    if new in ("done", "cancelled"):
+        w.closed_at = _now()
+    db.add(w)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.work_order.status", user_id=user.id, client_ip=request.client.host if request.client else None, resource=w.work_order_code, metadata={"from": cur, "to": new})
+    except Exception:
+        pass
+
+    return {"status": "ok", "work_order_code": w.work_order_code, "new": new}
+
+
+class WorkOrderUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = None
+    priority: Optional[str] = Field(default=None, max_length=30)
+    assigned_user_id: Optional[int] = None
+    assigned_role_id: Optional[int] = None
+    due_at: Optional[str] = None
+    meta: Optional[dict[str, Any]] = None
+
+
+@router.put("/work_orders/{work_order_id}")
+def update_work_order(
+    work_order_id: int,
+    req: WorkOrderUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
+    if not w:
+        raise HTTPException(status_code=404, detail="Not found")
+    if req.title is not None:
+        w.title = req.title
+    if req.description is not None:
+        w.description = req.description
+    if req.priority is not None:
+        w.priority = req.priority
+    if req.assigned_user_id is not None:
+        w.assigned_user_id = req.assigned_user_id
+    if req.assigned_role_id is not None:
+        w.assigned_role_id = req.assigned_role_id
+    if req.due_at is not None:
+        w.due_at = dt.datetime.fromisoformat(req.due_at.replace("Z", "+00:00")) if req.due_at else None
+    if req.meta is not None:
+        w.meta = req.meta
+    db.add(w)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.work_order.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=w.work_order_code, metadata={"id": w.id})
+    except Exception:
+        pass
+
+    return {"status": "ok"}
+
+
+@router.delete("/work_orders/{work_order_id}")
+def delete_work_order(
+    work_order_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
+    if not w:
+        raise HTTPException(status_code=404, detail="Not found")
+    code = w.work_order_code
+    db.delete(w)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.work_order.delete", user_id=user.id, client_ip=request.client.host if request.client else None, resource=code, metadata={"id": work_order_id})
+    except Exception:
+        pass
+
+    return {"status": "ok"}
+
+
+class PartUsageRequest(BaseModel):
+    part_id: int
+    qty_used: int = Field(gt=0)
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+@router.post("/work_orders/{work_order_id}/parts")
+def use_part(
+    work_order_id: int,
+    req: PartUsageRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("inventory:write")),
+):
+    w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
+    if not w:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    part = db.query(SparePart).filter(SparePart.id == req.part_id).one_or_none()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    part.quantity_on_hand = int(part.quantity_on_hand or 0) - int(req.qty_used)
+    txn = InventoryTransaction(
+        part_id=part.id,
+        qty_delta=-int(req.qty_used),
+        reason=req.reason or "issue",
+        work_order_id=w.id,
+        user_id=user.id,
+        client_ip=request.client.host if request.client else None,
+    )
+    db.add(part)
+    db.add(txn)
+    db.commit()
+
+    try:
+        audit.log(db, action="maintenance.work_order.part_use", user_id=user.id, client_ip=request.client.host if request.client else None, resource=w.work_order_code, metadata={"part": part.part_code, "qty": req.qty_used})
+    except Exception:
+        pass
+
+    return {"status": "ok", "quantity_on_hand": part.quantity_on_hand}

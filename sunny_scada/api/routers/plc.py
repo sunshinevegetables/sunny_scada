@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
 
 from sunny_scada.api.schemas import BitReadSignalRequest, BitWriteSignalRequest
-from sunny_scada.api.deps import get_storage, get_reader, get_writer, get_data_points_service
+from sunny_scada.api.deps import (
+    get_storage,
+    get_reader,
+    get_data_points_service,
+    get_db,
+    get_current_user,
+    require_permission,
+    get_audit_service,
+    get_command_service,
+)
+from sunny_scada.services.audit_service import AuditService
 from sunny_scada.services.data_points_service import DataPointsService
 
 router = APIRouter(tags=["plc"])
@@ -19,6 +30,7 @@ def bit_read_signal(
     req: BitReadSignalRequest,
     reader=Depends(get_reader),
     dp: DataPointsService = Depends(get_data_points_service),
+    _perm=Depends(require_permission("command:read")),
 ):
     # Find register in YAML (read section)
     target = dp.find_register(req.register, direction="read")
@@ -43,8 +55,13 @@ def bit_read_signal(
 @router.post("/bit_write_signal", summary="Write a Bit Signal to PLC", description="Send a bitwise signal to a specific PLC.")
 def bit_write_signal(
     req: BitWriteSignalRequest,
-    writer=Depends(get_writer),
+    request: Request,
     dp: DataPointsService = Depends(get_data_points_service),
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    user=Depends(get_current_user),
+    svc=Depends(get_command_service),
+    _perm=Depends(require_permission("command:write")),
 ):
     # Find register in YAML (write section)
     target = dp.find_register(req.register, direction="write")
@@ -58,9 +75,34 @@ def bit_write_signal(
             status_code=400,
             detail=f"Invalid bit '{req.bit}' for register '{req.register}'. Available bits: {list(bits.keys())}",
         )
+    # Queue a secure command (non-blocking).
+    res = svc.create(
+        db,
+        plc_name=req.plc_name,
+        datapoint_id=req.register,
+        kind="bit",
+        value=req.value,
+        bit=req.bit,
+        user_id=user.id,
+        client_ip=request.client.host if request.client else None,
+    )
 
-    ok = writer.bit_write_signal(req.plc_name, int(register_address), int(req.bit), int(req.value), verify=True)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to write bit signal.")
+    # Traceability (audit)
+    try:
+        audit.log(
+            db,
+            action="plc.bit_write_signal",
+            user_id=user.id,
+            client_ip=request.client.host if request.client else None,
+            resource=req.plc_name,
+            metadata={
+                "register": req.register,
+                "bit": req.bit,
+                "value": req.value,
+                "command_id": res.command_id,
+            },
+        )
+    except Exception:
+        pass
 
-    return {"message": f"Successfully wrote value {req.value} to bit {req.bit} of register {req.register} on {req.plc_name}"}
+    return {"message": f"Queued write of value {req.value} to bit {req.bit} of register {req.register} on {req.plc_name}", "command_id": res.command_id, "status": res.status}
