@@ -437,6 +437,133 @@ class Equipment(Base):
     vendor: Mapped[Optional[Vendor]] = relationship("Vendor", lazy="selectin")
 
 
+class Instrument(Base):
+    __tablename__ = "instruments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"), nullable=True, index=True)
+    vendor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    label: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+
+    instrument_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    serial_number: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    installed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    equipment: Mapped[Optional[Equipment]] = relationship("Equipment", lazy="selectin")
+    vendor: Mapped[Optional[Vendor]] = relationship("Vendor", lazy="selectin")
+
+    datapoints: Mapped[List["InstrumentDataPoint"]] = relationship(
+        "InstrumentDataPoint",
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    calibrations: Mapped[List["InstrumentCalibration"]] = relationship(
+        "InstrumentCalibration",
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    attachments: Mapped[List["InstrumentAttachment"]] = relationship(
+        "InstrumentAttachment",
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    spare_map: Mapped[List["InstrumentSpareMap"]] = relationship(
+        "InstrumentSpareMap",
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class InstrumentDataPoint(Base):
+    __tablename__ = "instrument_datapoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), index=True)
+    cfg_data_point_id: Mapped[int] = mapped_column(ForeignKey("cfg_data_points.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(50), default="process")
+
+    instrument: Mapped[Instrument] = relationship("Instrument", back_populates="datapoints", lazy="selectin")
+    cfg_data_point: Mapped["CfgDataPoint"] = relationship("CfgDataPoint", lazy="selectin")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "cfg_data_point_id", "role", name="uq_instrument_datapoints_key"),
+    )
+
+
+class InstrumentCalibration(Base):
+    __tablename__ = "instrument_calibrations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), nullable=False)
+
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    next_due_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    method: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    result: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    as_found: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    as_left: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    performed_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    certificate_no: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    instrument: Mapped[Instrument] = relationship("Instrument", back_populates="calibrations", lazy="selectin")
+
+    __table_args__ = (
+        Index("ix_instrument_calibrations_instrument_ts", "instrument_id", "ts"),
+        Index("ix_instrument_calibrations_next_due_at", "next_due_at"),
+    )
+
+
+class InstrumentAttachment(Base):
+    __tablename__ = "instrument_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), index=True)
+
+    filename: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    uploaded_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    instrument: Mapped[Instrument] = relationship("Instrument", back_populates="attachments", lazy="selectin")
+
+
+class InstrumentSpareMap(Base):
+    __tablename__ = "instrument_spare_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("spare_parts.id", ondelete="CASCADE"), index=True)
+
+    qty_required: Mapped[int] = mapped_column(Integer, default=1)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    instrument: Mapped[Instrument] = relationship("Instrument", back_populates="spare_map", lazy="selectin")
+    part: Mapped["SparePart"] = relationship("SparePart", lazy="selectin")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "part_id", name="uq_instrument_spare_map_instrument_part"),
+    )
+
+
 class SparePart(Base):
     __tablename__ = "spare_parts"
 
@@ -466,6 +593,7 @@ class WorkOrder(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"), nullable=True, index=True)
+    instrument_id: Mapped[Optional[int]] = mapped_column(ForeignKey("instruments.id", ondelete="SET NULL"), nullable=True, index=True)
     schedule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("schedules.id", ondelete="SET NULL"), nullable=True)
     task_template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("task_templates.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(30), index=True, default="open")
@@ -480,6 +608,7 @@ class WorkOrder(Base):
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
 
     equipment: Mapped[Optional[Equipment]] = relationship("Equipment", lazy="selectin")
+    instrument: Mapped[Optional[Instrument]] = relationship("Instrument", lazy="selectin")
     assigned_user: Mapped[Optional[User]] = relationship("User", foreign_keys=[assigned_user_id], lazy="selectin")
     assigned_role: Mapped[Optional[Role]] = relationship("Role", foreign_keys=[assigned_role_id], lazy="selectin")
 

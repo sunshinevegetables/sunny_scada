@@ -16,7 +16,18 @@ def _first_writable_digital(client: TestClient) -> tuple[str, int]:
             .order_by(CfgDataPoint.id.asc())
             .first()
         )
-        assert dp is not None, "Expected at least one writable DIGITAL datapoint in seeded DB"
+        if dp is None:
+            dp = CfgDataPoint(
+                owner_type="plc",
+                owner_id=1,
+                label="TEST_CMD_DIGITAL",
+                category="write",
+                type="DIGITAL",
+                address="40001",
+            )
+            db.add(dp)
+            db.commit()
+            db.refresh(dp)
         allowed = sorted({b.bit for b in (dp.bits or [])})
         bit = allowed[0] if allowed else 0
         return f"db-dp:{dp.id}", int(bit)

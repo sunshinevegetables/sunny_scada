@@ -52,8 +52,17 @@ def ctx(tmp_path: Path):
     Base.metadata.create_all(runtime.engine)
 
     app = FastAPI()
+
+    class _ReaderStub:
+        def __init__(self) -> None:
+            self.config_data = {}
+
+        def read_plcs_from_config(self) -> None:
+            return None
+
     app.state.db_sessionmaker = runtime.SessionLocal
     app.state.storage = DataStorage()
+    app.state.plc_reader = _ReaderStub()
     app.state.auth_service = AuthService(jwt_secret_key="test-secret")
     app.state.access_control_service = AccessControlService()
 
@@ -278,13 +287,13 @@ def _all_datapoint_names(resp_json: dict) -> list[str]:
     names: list[str] = []
     for plc in resp_json.get("plcs", []) or []:
         for dp in plc.get("datapoints", []) or []:
-            names.append(dp.get("name"))
+            names.append(dp.get("label"))
         for c in plc.get("containers", []) or []:
             for dp in c.get("datapoints", []) or []:
-                names.append(dp.get("name"))
+                names.append(dp.get("label"))
             for e in c.get("equipment", []) or []:
                 for dp in e.get("datapoints", []) or []:
-                    names.append(dp.get("name"))
+                    names.append(dp.get("label"))
     return [n for n in names if n is not None]
 
 
@@ -328,15 +337,15 @@ def test_plc_data_role_grant_plc_a_only_returns_plc_a(ctx):
     # Spot-check value resolution
     plc_a = payload["plcs"][0]
     assert plc_a["timestamp"] is not None
-    assert {dp["name"]: dp["value"] for dp in plc_a["datapoints"]} == {"PLC A INT": 101}
+    assert {dp["label"]: dp["value"] for dp in plc_a["datapoints"]} == {"PLC A INT": 101}
 
     # REAL prefers scaled_value
     cont = plc_a["containers"][0]
-    assert {dp["name"]: dp["value"] for dp in cont["datapoints"]} == {"CONT A REAL": 12.34}
+    assert {dp["label"]: dp["value"] for dp in cont["datapoints"]} == {"CONT A REAL": 12.34}
 
     # DIGITAL with configured bits -> {label: bool}
     eq = cont["equipment"][0]
-    assert {dp["name"]: dp["value"] for dp in eq["datapoints"]} == {"EQ A DIG": {"Run": True, "Fault": False}}
+    assert {dp["label"]: dp["value"] for dp in eq["datapoints"]} == {"EQ A DIG": {"Run": True, "Fault": False}}
 
 
 def test_plc_data_role_grant_plc_a_plus_user_grant_plc_b_returns_both(ctx):

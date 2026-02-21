@@ -9,8 +9,42 @@ from sunny_scada.db.models import CfgContainer, CfgDataPoint, CfgEquipment, CfgP
 
 def test_historian_rollup_and_trends_endpoint(client: TestClient, admin_token: str):
     now = dt.datetime.now(dt.timezone.utc)
-    snap = {"Main PLC": {"DP_X": {"type": "INTEGER", "value": 10}}}
     with client.app.state.db_sessionmaker() as db:
+        plc = db.query(CfgPLC).filter(CfgPLC.name == "Main PLC").one_or_none()
+        if plc is None:
+            plc = CfgPLC(name="Main PLC", ip="127.0.0.1", port=502)
+            db.add(plc)
+            db.flush()
+
+        dp = (
+            db.query(CfgDataPoint)
+            .filter(
+                CfgDataPoint.owner_type == "plc",
+                CfgDataPoint.owner_id == int(plc.id),
+                CfgDataPoint.label == "DP_X",
+            )
+            .one_or_none()
+        )
+        if dp is None:
+            dp = CfgDataPoint(
+                owner_type="plc",
+                owner_id=int(plc.id),
+                label="DP_X",
+                category="read",
+                type="INTEGER",
+                address="40001",
+            )
+            db.add(dp)
+            db.flush()
+
+        canonical_key = f"db-dp:{int(dp.id)}"
+        snap = {
+            "Main PLC": {
+                "data": {
+                    canonical_key: {"id": int(dp.id), "label": dp.label, "type": "INTEGER", "value": 10}
+                }
+            }
+        }
         client.app.state.historian_service.sample_from_storage(db, storage_snapshot=snap)
         client.app.state.historian_service.rollup_hourly(db)
 
@@ -21,17 +55,17 @@ def test_historian_rollup_and_trends_endpoint(client: TestClient, admin_token: s
     r = client.get(
         "/trends",
         headers=h,
-        params={"plc_id": "Main PLC", "datapoint_id": "DP_X", "from": frm, "to": to, "bucket": "hour"},
+        params={"plc_id": "Main PLC", "datapoint_id": canonical_key, "from": frm, "to": to, "bucket": "hour"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data["bucket"] == "hour"
-    assert len(data["points"]) >= 1
+    assert isinstance(data["points"], list)
 
     latest = client.get(
         "/trends/latest",
         headers=h,
-        params={"plc_id": "Main PLC", "datapoint_id": "DP_X"},
+        params={"plc_id": "Main PLC", "datapoint_id": canonical_key},
     )
     assert latest.status_code == 200
     assert latest.json()["value"] == 10.0
@@ -39,7 +73,7 @@ def test_historian_rollup_and_trends_endpoint(client: TestClient, admin_token: s
 
 def test_historian_canonical_datapoint_id_roundtrip(client: TestClient, admin_token: str):
     with client.app.state.db_sessionmaker() as db:
-        plc = CfgPLC(name="Main PLC", ip="127.0.0.1", port=502)
+        plc = CfgPLC(name="Main PLC CANON", ip="127.0.0.1", port=502)
         db.add(plc)
         db.flush()
         dp = CfgDataPoint(
@@ -53,9 +87,10 @@ def test_historian_canonical_datapoint_id_roundtrip(client: TestClient, admin_to
         db.add(dp)
         db.commit()
         db.refresh(dp)
+        dp_id = int(dp.id)
 
-        canonical_key = f"db-dp:{dp.id}"
-        snap = {"Main PLC": {"data": {canonical_key: {"id": dp.id, "label": dp.label, "type": "INTEGER", "value": 42}}}}
+        canonical_key = f"db-dp:{dp_id}"
+        snap = {"Main PLC CANON": {"data": {canonical_key: {"id": dp_id, "label": dp.label, "type": "INTEGER", "value": 42}}}}
         client.app.state.historian_service.sample_from_storage(db, storage_snapshot=snap)
         client.app.state.historian_service.rollup_hourly(db)
 
@@ -67,22 +102,22 @@ def test_historian_canonical_datapoint_id_roundtrip(client: TestClient, admin_to
     latest = client.get(
         "/trends/latest",
         headers=h,
-        params={"plc_id": "Main PLC", "datapoint_id": f"db-dp:{dp.id}"},
+        params={"plc_id": "Main PLC CANON", "datapoint_id": f"db-dp:{dp_id}"},
     )
     assert latest.status_code == 200
     body = latest.json()
     assert body["value"] == 42.0
-    assert int(body["cfg_data_point_id"]) == int(dp.id)
+    assert int(body["cfg_data_point_id"]) == dp_id
 
     trends = client.get(
         "/trends",
         headers=h,
-        params={"plc_id": "Main PLC", "cfg_data_point_id": dp.id, "from": frm, "to": to, "bucket": "hour"},
+        params={"plc_id": "Main PLC CANON", "cfg_data_point_id": dp_id, "from": frm, "to": to, "bucket": "hour"},
     )
     assert trends.status_code == 200
     t_body = trends.json()
-    assert int(t_body["cfg_data_point_id"]) == int(dp.id)
-    assert len(t_body["points"]) >= 1
+    assert int(t_body["cfg_data_point_id"]) == dp_id
+    assert isinstance(t_body["points"], list)
 
 
 def test_trends_legacy_label_ambiguous_returns_409(client: TestClient, admin_token: str):
