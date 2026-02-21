@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sunny_scada.db.models import HistorianHourlyRollup, HistorianSample
 from sunny_scada.services.datapoint_identity import (
     AmbiguousDatapointIdentifierError,
+    CANONICAL_DP_PREFIX,
     resolve_cfg_datapoint_identifier,
 )
 
@@ -92,6 +93,18 @@ class HistorianService:
                 leaf_key = path[-1] if path else ""
                 if not leaf_key:
                     continue
+
+                if not str(leaf_key).startswith(CANONICAL_DP_PREFIX):
+                    logger.warning(
+                        "Historian non-canonical snapshot key plc=%s leaf=%s path=%s label=%s owner_type=%s owner_id=%s",
+                        plc_name,
+                        leaf_key,
+                        "/".join(path),
+                        leaf.get("label") if isinstance(leaf, dict) else None,
+                        leaf.get("owner_type") if isinstance(leaf, dict) else None,
+                        leaf.get("owner_id") if isinstance(leaf, dict) else None,
+                    )
+
                 v = _extract_numeric_leaf(leaf)
                 if v is None:
                     continue
