@@ -5,6 +5,7 @@ from . import (
     iqf,
     health,
     auth,
+    oauth,
     config_admin,
     commands,
     logs,
@@ -13,6 +14,11 @@ from . import (
     maintenance,
     trends,
     system_config,
+    ws_alarms,
+    ws_commands,
+    admin_alarm_rules,
+    admin_alarm_log,
+    frontend_alarms,
 )
 
 __all__ = [
@@ -22,6 +28,7 @@ __all__ = [
     "iqf",
     "health",
     "auth",
+    "oauth",
     "config_admin",
     "commands",
     "logs",
@@ -30,4 +37,9 @@ __all__ = [
     "maintenance",
     "trends",
     "system_config",
+    "ws_alarms",
+    "ws_commands",
+    "admin_alarm_rules",
+    "admin_alarm_log",
+    "frontend_alarms",
 ]

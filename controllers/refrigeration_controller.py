@@ -1,6 +1,10 @@
 import time
 from plc_writer import PLCWriter
 from plc_reader import PLCReader
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class RefrigerationSystemController:
@@ -42,7 +46,7 @@ class RefrigerationSystemController:
         """
         signal_details = self.plc_writer.write_signals.get(signal_name)
         if not signal_details:
-            print(f"Signal '{signal_name}' not found.")
+            logger.warning("Signal '%s' not found.", signal_name)
             return False
         register_address = signal_details["register"]
         return self.plc_writer.bit_write_signal(self.plc_name, register_address, bit_position, value)
@@ -98,20 +102,20 @@ class RefrigerationSystemController:
         while True:
             suction_pressure = self.read_suction_pressure()
             if suction_pressure is None:
-                print("Failed to read suction pressure.")
+                logger.warning("Failed to read suction pressure.")
                 time.sleep(1)
                 continue
 
-            print(f"Suction Pressure: {suction_pressure}")
+            logger.info("Suction Pressure: %s", suction_pressure)
 
             if suction_pressure >= 50:
-                print("High suction pressure detected. Starting condenser, compressor, and loading compressor.")
+                logger.info("High suction pressure detected. Starting condenser, compressor, and loading compressor.")
                 self.start_condenser()
                 self.start_compressor()
                 self.load_compressor()
 
             elif suction_pressure <= 35:
-                print("Low suction pressure detected. Unloading compressor, stopping compressor, and stopping condenser.")
+                logger.info("Low suction pressure detected. Unloading compressor, stopping compressor, and stopping condenser.")
                 self.unload_compressor()
                 self.stop_compressor()
                 self.stop_condenser()

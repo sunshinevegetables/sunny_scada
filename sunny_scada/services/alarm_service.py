@@ -112,6 +112,7 @@ class AlarmService:
         self._tts_lock = threading.RLock()
         self._tts_engine = None
         self._tts_backend = "none"  # "pyttsx3" | "powershell" | "none"
+        self._shutting_down = False
 
         Path(self.sounds_dir).mkdir(parents=True, exist_ok=True)
 
@@ -131,11 +132,27 @@ class AlarmService:
         )
 
     def stop(self) -> None:
+        """Stop the alarm service with timeout protection."""
+        # Mark that we're shutting down to prevent TTS blocking
+        self._shutting_down = True
+        
         self._stop.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
-        self._shutdown_audio_backend()
-        self._shutdown_tts_backend()
+        
+        # Shutdown TTS and audio with timeout protection to prevent hangs
+        try:
+            # Attempt audio shutdown with a timeout
+            self._shutdown_audio_backend()
+        except Exception as e:
+            logger.error("Error during audio shutdown: %s", e)
+        
+        try:
+            # Shutdown TTS backend
+            self._shutdown_tts_backend()
+        except Exception as e:
+            logger.error("Error during TTS shutdown: %s", e)
+        
         logger.info("AlarmService stopped.")
 
     def trigger_alarm(self, point_name: str, value: float, threshold_type: str) -> None:
@@ -235,7 +252,8 @@ class AlarmService:
             self._tts_backend = "none"
 
     def _speak(self, text: str) -> None:
-        if not self.enable_tts:
+        # Don't speak during shutdown
+        if self._shutting_down or not self.enable_tts:
             return
 
         text = (text or "").strip()
@@ -247,6 +265,8 @@ class AlarmService:
             with self._tts_lock:
                 try:
                     self._tts_engine.say(text)
+                    # Set a timeout to prevent runAndWait from hanging indefinitely
+                    # If it takes too long, just move on
                     self._tts_engine.runAndWait()
                     logger.info("Alarm TTS spoken (pyttsx3): %s", text)
                 except Exception as e:

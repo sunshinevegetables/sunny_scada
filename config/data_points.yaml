@@ -1221,6 +1221,7 @@ data_points:
                 BIT 1: STOP
                 BIT 2: AUTO/MANUAL
                 BIT 3: SV1
+                BIT 4: ON/OFF
               category: STATUS
               process: REFRIGERATION
           write:

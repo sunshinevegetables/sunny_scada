@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from sunny_scada.db.models import (
     Alarm,
+    AlarmEvent,
+    AlarmOccurrence,
     AuditLog,
     Command,
     CommandEvent,
@@ -72,6 +74,14 @@ class RetentionService:
         # Alarms
         c = _cutoff(alarms_days)
         summary["alarms"] = db.query(Alarm).filter(Alarm.ts < c).delete(synchronize_session=False)
+        summary["alarm_events"] = db.query(AlarmEvent).filter(AlarmEvent.ts < c).delete(synchronize_session=False)
+        # occurrences are derived from events; keep longer if you want, but clean old inactive ones
+        summary["alarm_occurrences"] = (
+            db.query(AlarmOccurrence)
+            .filter(AlarmOccurrence.is_active == False)  # noqa: E712
+            .filter(AlarmOccurrence.last_seen_at < c)
+            .delete(synchronize_session=False)
+        )
 
         # Historian raw samples
         c = _cutoff(historian_raw_days)

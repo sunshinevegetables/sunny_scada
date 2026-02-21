@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from sunny_scada.db.models import Command, CommandEvent
 from sunny_scada.plc_writer import PLCWriter
+from sunny_scada.services.command_log_payload import build_command_log_payload
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class CommandExecutor:
     - Non-blocking HTTP: API stores a command row and enqueues it.
 
     Safety: Command creation must already validate the datapoint against
-    `data_points.yaml` and store resolved write parameters in payload.
+    the database and store resolved write parameters in payload.
     """
 
     def __init__(
@@ -35,11 +36,13 @@ class CommandExecutor:
         *,
         sessionmaker: Callable[[], Session],
         writer: PLCWriter,
+        broadcaster=None,
         max_retries: int = 2,
         backoff_s: float = 0.25,
     ) -> None:
         self._sessionmaker = sessionmaker
         self._writer = writer
+        self._broadcaster = broadcaster
         self._max_retries = max(0, int(max_retries))
         self._backoff_s = max(0.0, float(backoff_s))
 
@@ -75,15 +78,23 @@ class CommandExecutor:
                 t.start()
         q.put(WorkItem(command_row_id=command_row_id))
 
-    def _add_event(self, db: Session, cmd: Command, status: str, message: Optional[str] = None, meta: Optional[dict] = None) -> None:
-        db.add(
-            CommandEvent(
-                command_row_id=cmd.id,
-                status=status,
-                message=message,
-                meta=meta or {},
-            )
+    def _emit(self, payload: dict) -> None:
+        if not self._broadcaster:
+            return
+        try:
+            self._broadcaster(payload)
+        except Exception:
+            logger.debug("CommandExecutor broadcast failed", exc_info=True)
+
+    def _add_event(self, db: Session, cmd: Command, status: str, message: Optional[str] = None, meta: Optional[dict] = None) -> CommandEvent:
+        evt = CommandEvent(
+            command_row_id=cmd.id,
+            status=status,
+            message=message,
+            meta=meta or {},
         )
+        db.add(evt)
+        return evt
 
     def _worker(self, plc_name: str) -> None:
         q = self._queues[plc_name]
@@ -103,9 +114,12 @@ class CommandExecutor:
 
                     cmd.status = "executing"
                     cmd.attempts = int(cmd.attempts or 0)
-                    self._add_event(db, cmd, "executing")
+                    evt = self._add_event(db, cmd, "executing")
                     db.add(cmd)
                     db.commit()
+                    db.refresh(cmd)
+                    db.refresh(evt)
+                    self._emit(build_command_log_payload(cmd, evt))
 
                     ok = False
                     last_err: Optional[str] = None
@@ -115,8 +129,11 @@ class CommandExecutor:
                         # reload to observe cancellation
                         db.refresh(cmd)
                         if cmd.status == "cancelled":
-                            self._add_event(db, cmd, "cancelled")
+                            evt = self._add_event(db, cmd, "cancelled")
                             db.commit()
+                            db.refresh(cmd)
+                            db.refresh(evt)
+                            self._emit(build_command_log_payload(cmd, evt))
                             ok = False
                             last_err = "cancelled"
                             break
@@ -140,15 +157,18 @@ class CommandExecutor:
                     if ok:
                         cmd.status = "success"
                         cmd.error_message = None
-                        self._add_event(db, cmd, "success")
+                        evt = self._add_event(db, cmd, "success")
                     else:
                         if cmd.status != "cancelled":
                             cmd.status = "failed"
                         cmd.error_message = last_err
-                        self._add_event(db, cmd, cmd.status, message=last_err)
+                        evt = self._add_event(db, cmd, cmd.status, message=last_err)
 
                     db.add(cmd)
                     db.commit()
+                    db.refresh(cmd)
+                    db.refresh(evt)
+                    self._emit(build_command_log_payload(cmd, evt))
 
             except Exception as e:
                 logger.exception("Command worker error for plc=%s: %s", plc_name, e)

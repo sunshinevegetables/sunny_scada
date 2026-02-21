@@ -48,18 +48,41 @@ def test_plc_container_equipment_datapoint_crud(client, admin_token):
             "type": "DIGITAL",
             "address": "DB10.DBW2",
             "bitLabels": {"0": "Ready", "1": "Run", "7": "Trip", "9": "Pump On"},
+            "bitPositions": {
+                "0": {"label": "Ready", "class": "status"},
+                "1": {"label": "Run", "class": "run-state"},
+                "7": {"label": "Trip", "class": "trip-state"},
+                "9": {"label": "Pump On", "class": "pump-state"},
+            },
         },
     )
     assert r.status_code == 200, r.text
     dp = r.json()
     assert dp["type"] == "DIGITAL"
     assert dp["bitLabels"]["9"] == "Pump On" or dp["bitLabels"][9] == "Pump On"
+    assert dp["bitPositions"]["9"]["class"] == "pump-state" or dp["bitPositions"][9]["class"] == "pump-state"
     dp_id = dp["id"]
 
     # Patch datapoint
     r = client.patch(f"/api/config/data-points/{dp_id}", headers=h, json={"description": "Updated"})
     assert r.status_code == 200, r.text
     assert r.json()["description"] == "Updated"
+
+    # Patch DIGITAL bit definitions (replace-on-write) should not violate unique constraints
+    r = client.patch(
+        f"/api/config/data-points/{dp_id}",
+        headers=h,
+        json={
+            "bitPositions": {
+                "2": {"label": "Auto", "class": "mode"},
+                "9": {"label": "Pump On", "class": "pump-state"},
+            }
+        },
+    )
+    assert r.status_code == 200, r.text
+    dp2 = r.json()
+    bit2 = dp2["bitPositions"].get("2") or dp2["bitPositions"].get(2)
+    assert bit2 and bit2["label"] == "Auto"
 
     # Reject bitLabels on non-DIGITAL
     r = client.post(

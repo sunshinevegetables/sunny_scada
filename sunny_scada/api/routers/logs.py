@@ -6,15 +6,16 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import cast, literal, select, union_all, String, func
 
 from sunny_scada.api.deps import (
     get_db,
-    get_current_user_optional,
+    get_current_principal,
     get_rate_limiter,
-    get_settings,
     require_permission,
 )
-from sunny_scada.db.models import Alarm, AuditLog, Command, ServerLog
+from sunny_scada.api.security import Principal
+from sunny_scada.db.models import Alarm, AlarmEvent, AlarmOccurrence, AuditLog, Command, ServerLog
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -34,23 +35,12 @@ def ingest_client_log(
     req: ClientLogRequest,
     request: Request,
     db: Session = Depends(get_db),
-    settings=Depends(get_settings),
-    user=Depends(get_current_user_optional),
+    principal: Principal = Depends(get_current_principal),
     limiter=Depends(get_rate_limiter),
 ):
-    # token-based ingestion
-    token = request.headers.get("X-Client-Log-Token", "").strip()
-    if settings.client_log_token:
-        if token != settings.client_log_token and user is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-    else:
-        # if no token configured, require auth
-        if user is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-
-    # rate limit by ip
+    # rate limit by principal+ip
     ip = request.client.host if request.client else "unknown"
-    lim = limiter.allow(f"clientlog:{ip}", limit=120, window_s=60)
+    lim = limiter.allow(f"clientlog:{principal.actor_key}:{ip}", limit=120, window_s=60)
     if not lim.allowed:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
@@ -60,9 +50,9 @@ def ingest_client_log(
             logger=None,
             message=req.message,
             source="client",
-            user_id=user.id if user else None,
+            user_id=principal.user.id if principal.user else None,
             client_ip=ip,
-            meta=req.meta,
+            meta={"actor": principal.actor_key, **(req.meta or {})},
         )
     )
     db.commit()
@@ -134,13 +124,20 @@ def query_command_logs(
         "items": [
             {
                 "command_id": r.command_id,
-                "plc_name": r.plc_name,
-                "datapoint_id": r.datapoint_id,
-                "kind": r.kind,
+                "time": r.created_at,
+                "plc": r.plc_name,
+                "container": r.plc_name,
+                "equipment": (r.payload or {}).get("equipment_label", "Unknown"),
+                "data_point_label": (r.payload or {}).get("datapoint_label", r.datapoint_id),
+                "bit_label": (r.payload or {}).get("bit_label"),
+                "bit": (r.payload or {}).get("bit"),
+                "value": (r.payload or {}).get("value"),
                 "status": r.status,
                 "attempts": r.attempts,
+                "username": r.user.username if r.user else "System",
+                "client_ip": r.client_ip or "Unknown",
                 "error_message": r.error_message,
-                "created_at": r.created_at,
+                "payload": r.payload,
             }
             for r in rows
         ],
@@ -156,16 +153,49 @@ def query_alarm_logs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    q = db.query(Alarm)
+    # Legacy (alarms table) + unified alarm_events join.
+    s1 = select(
+        Alarm.ts.label("ts"),
+        Alarm.severity.label("severity"),
+        Alarm.message.label("message"),
+        Alarm.source.label("source"),
+        Alarm.alarm_id.label("alarm_id"),
+        Alarm.acked.label("acked"),
+        Alarm.acked_at.label("acked_at"),
+        Alarm.acked_by_user_id.label("acked_by_user_id"),
+        Alarm.meta.label("meta"),
+    )
     if acked is not None:
-        q = q.filter(Alarm.acked == bool(acked))
+        s1 = s1.where(Alarm.acked == bool(acked))
     if severity:
-        q = q.filter(Alarm.severity == severity)
+        s1 = s1.where(Alarm.severity == severity)
 
-    total = q.count()
-    rows = q.order_by(Alarm.ts.desc()).offset(offset).limit(limit).all()
+    s2 = (
+        select(
+            AlarmEvent.ts.label("ts"),
+            AlarmEvent.severity.label("severity"),
+            AlarmEvent.message.label("message"),
+            AlarmEvent.source.label("source"),
+            (literal("ev_") + cast(AlarmEvent.id, String)).label("alarm_id"),
+            AlarmOccurrence.acknowledged.label("acked"),
+            AlarmOccurrence.acknowledged_at.label("acked_at"),
+            AlarmOccurrence.acknowledged_by_user_id.label("acked_by_user_id"),
+            AlarmEvent.meta.label("meta"),
+        )
+        .select_from(AlarmEvent)
+        .join(AlarmOccurrence, AlarmEvent.occurrence_id == AlarmOccurrence.id)
+    )
+    if acked is not None:
+        s2 = s2.where(AlarmOccurrence.acknowledged == bool(acked))
+    if severity:
+        s2 = s2.where(AlarmEvent.severity == severity)
+
+    u = union_all(s1, s2).subquery()
+    total = db.execute(select(func.count()).select_from(u)).scalar() or 0
+    rows = db.execute(select(u).order_by(u.c.ts.desc()).offset(offset).limit(limit)).all()
+
     return {
-        "total": total,
+        "total": int(total),
         "items": [
             {
                 "alarm_id": r.alarm_id,
@@ -173,7 +203,7 @@ def query_alarm_logs(
                 "severity": r.severity,
                 "message": r.message,
                 "source": r.source,
-                "acked": r.acked,
+                "acked": bool(r.acked),
                 "acked_at": r.acked_at,
                 "acked_by_user_id": r.acked_by_user_id,
                 "meta": r.meta,

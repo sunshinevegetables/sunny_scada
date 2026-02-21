@@ -1,0 +1,3897 @@
+(() => {
+  "use strict";
+
+  // -----------------------------
+  // Tiny DOM helpers
+  // -----------------------------
+  const $ = (id) => document.getElementById(id);
+  const qs = (sel, root = document) => root.querySelector(sel);
+
+  function el(tag, attrs = {}, children = []) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === "class") node.className = v;
+      else if (k === "dataset") Object.assign(node.dataset, v);
+      else if (k === "text") node.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+      else if (v === null || typeof v === "undefined") continue;
+      else node.setAttribute(k, String(v));
+    }
+    for (const c of children || []) {
+      if (c === null || typeof c === "undefined") continue;
+      if (typeof c === "string") node.appendChild(document.createTextNode(c));
+      else node.appendChild(c);
+    }
+    return node;
+  }
+
+  function clampInt(value, fallback = 0) {
+    const n = Number.parseInt(String(value), 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function clampFloat(value, fallback = 1.0) {
+    const n = Number.parseFloat(String(value));
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  // -----------------------------
+  // Auth token storage
+  // -----------------------------
+  const AUTH_KEY = "scada_admin_auth_v1";
+
+  const authStore = {
+    _read(storage) {
+      try {
+        const raw = storage.getItem(AUTH_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj !== "object") return null;
+        if (!obj.access_token || !obj.refresh_token) return null;
+        return obj;
+      } catch {
+        return null;
+      }
+    },
+    get() {
+      return this._read(sessionStorage) || this._read(localStorage);
+    },
+    set(tokens, remember) {
+      const payload = {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_type: tokens.token_type || "bearer",
+        remember: !!remember,
+        saved_at: new Date().toISOString(),
+      };
+      if (remember) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify(payload));
+        sessionStorage.removeItem(AUTH_KEY);
+      } else {
+        sessionStorage.setItem(AUTH_KEY, JSON.stringify(payload));
+        localStorage.removeItem(AUTH_KEY);
+      }
+    },
+    clear() {
+      sessionStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(AUTH_KEY);
+    },
+    accessToken() {
+      const a = this.get();
+      return a?.access_token || null;
+    },
+    refreshToken() {
+      const a = this.get();
+      return a?.refresh_token || null;
+    },
+  };
+
+  // -----------------------------
+  // API client (with refresh-on-401)
+  // -----------------------------
+  const api = {
+    _refreshInFlight: null,
+
+    async safeJson(res) {
+      try {
+        return await res.json();
+      } catch {
+        return null;
+      }
+    },
+
+    errorMessage(data, fallback = "Request failed") {
+      if (!data) return fallback;
+      if (typeof data === "string") return data;
+      if (typeof data.detail === "string") return data.detail;
+      if (Array.isArray(data.detail)) {
+        // pydantic validation errors
+        return data.detail.map((e) => e.msg || e.message || "Invalid input").join("; ");
+      }
+      return fallback;
+    },
+
+    async refresh() {
+      if (this._refreshInFlight) return this._refreshInFlight;
+
+      const refresh_token = authStore.refreshToken();
+      if (!refresh_token) throw new Error("No refresh token");
+
+      this._refreshInFlight = (async () => {
+        const res = await fetch("/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token }),
+        });
+
+        if (!res.ok) {
+          const data = await this.safeJson(res);
+          throw new Error(this.errorMessage(data, "Session expired"));
+        }
+
+        const data = await res.json();
+        // Refresh token rotation: store the NEW refresh token returned by the server.
+        authStore.set({ access_token: data.access_token, refresh_token: data.refresh_token }, authStore.get()?.remember);
+        return data.access_token;
+      })();
+
+      try {
+        return await this._refreshInFlight;
+      } finally {
+        this._refreshInFlight = null;
+      }
+    },
+
+    async request(method, url, opts = {}) {
+      const { json, query, headers = {}, skipAuth = false, _retry = false } = opts || {};
+      const u = new URL(url, window.location.origin);
+
+      if (query && typeof query === "object") {
+        for (const [k, v] of Object.entries(query)) {
+          if (v === null || typeof v === "undefined") continue;
+          u.searchParams.set(k, String(v));
+        }
+      }
+
+      const h = new Headers(headers || {});
+      if (json !== undefined) h.set("Content-Type", "application/json");
+      if (!skipAuth) {
+        const token = authStore.accessToken();
+        if (token) h.set("Authorization", `Bearer ${token}`);
+      }
+
+      const res = await fetch(u.toString(), {
+        method,
+        headers: h,
+        body: json !== undefined ? JSON.stringify(json) : undefined,
+      });
+
+      if (res.status === 401 && !skipAuth && !_retry) {
+        try {
+          await this.refresh();
+          return await this.request(method, url, { ...opts, _retry: true });
+        } catch {
+          authStore.clear();
+          if (window.location.pathname !== "/admin-panel/login") {
+            window.location.href = "/admin-panel/login";
+          }
+          throw new Error("Not authenticated");
+        }
+      }
+
+      const contentType = res.headers.get("Content-Type") || "";
+      const isJson = contentType.includes("application/json");
+      const data = isJson ? await this.safeJson(res) : await res.text();
+
+      if (!res.ok) {
+        throw new Error(this.errorMessage(data, `HTTP ${res.status}`));
+      }
+
+      return data;
+    },
+
+    get(url, opts) {
+      return this.request("GET", url, opts);
+    },
+    post(url, opts) {
+      return this.request("POST", url, opts);
+    },
+    put(url, opts) {
+      return this.request("PUT", url, opts);
+    },
+    patch(url, opts) {
+      return this.request("PATCH", url, opts);
+    },
+    delete(url, opts) {
+      return this.request("DELETE", url, opts);
+    },
+  };
+
+  // -----------------------------
+  // UI primitives
+  // -----------------------------
+  let toastTimer = null;
+
+  function toast(message, kind = "ok") {
+    const t = $("toast");
+    if (!t) return;
+
+    t.textContent = message;
+    t.classList.remove("hidden");
+    t.classList.remove("ok", "error");
+    if (kind === "error") t.classList.add("error");
+    else t.classList.add("ok");
+
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => t.classList.add("hidden"), 3200);
+  }
+
+  function setStatus(elOrId, message = "", kind = "") {
+    const node = typeof elOrId === "string" ? $(elOrId) : elOrId;
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.remove("ok", "error");
+    if (kind) node.classList.add(kind);
+  }
+
+  function openDialog(idOrNode) {
+    const dlg = typeof idOrNode === "string" ? $(idOrNode) : idOrNode;
+    if (!dlg) return;
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.open = true;
+  }
+
+  function closeDialog(idOrNode) {
+    const dlg = typeof idOrNode === "string" ? $(idOrNode) : idOrNode;
+    if (!dlg) return;
+    try {
+      dlg.close();
+    } catch {
+      dlg.open = false;
+    }
+  }
+
+  function confirmDanger(msg) {
+    return window.confirm(msg);
+  }
+
+  function can(perms, p) {
+    return perms.has(p) || perms.has(p.split(":", 1)[0] + ":*");
+  }
+
+  function formatList(arr) {
+    if (!arr || !arr.length) return "—";
+    return arr.join(", ");
+  }
+
+  // -----------------------------
+  // Global app state
+  // -----------------------------
+  const state = {
+    me: null,
+    perms: new Set(),
+    users: [],
+    roles: [],
+    cfgTree: [],
+    cfgIndex: new Map(), // key -> { key, type, id, name, parentKey, raw }
+    cfgCollapsed: new Set(),
+    cfgSelectedKey: null,
+
+    meta: {
+      classes: [],
+      units: [],
+      groups: [],
+      loaded: false,
+    },
+
+    access: {
+      principalType: "role",
+      principalId: null,
+      grants: [],
+      grantByKey: new Map(), // resource_type:id -> grant
+      selectedKey: null,
+      collapsed: new Set(),
+    },
+
+    alarms: {
+      datapoints: [],
+      rules: [],
+      selectedDatapointId: null,
+      loaded: false,
+    },
+    alarmLog: {
+      items: [],
+      total: 0,
+      limit: 200,
+      offset: 0,
+    },
+    commandLog: {
+      items: [],
+      total: 0,
+      limit: 200,
+      offset: 0,
+      ws: {
+        socket: null,
+        retryTimer: null,
+      },
+    },
+  };
+
+  // -----------------------------
+  // Datapoint meta options (classes / units / groups)
+  // -----------------------------
+  const META_KIND = {
+    class: { label: "Class", endpoint: "/api/config/datapoint-classes" },
+    unit: { label: "Unit", endpoint: "/api/config/datapoint-units" },
+    group: { label: "Group", endpoint: "/api/config/datapoint-groups" },
+  };
+
+  async function ensureMetaLoaded(force = false) {
+    if (state.meta.loaded && !force) return;
+    // These endpoints are protected by config:read / config:write.
+    const [classes, units, groups] = await Promise.all([
+      api.get(META_KIND.class.endpoint),
+      api.get(META_KIND.unit.endpoint),
+      api.get(META_KIND.group.endpoint),
+    ]);
+
+    state.meta.classes = Array.isArray(classes) ? classes : [];
+    state.meta.units = Array.isArray(units) ? units : [];
+    state.meta.groups = Array.isArray(groups) ? groups : [];
+    state.meta.loaded = true;
+  }
+
+    // -----------------------------
+  // Routing (hash views) - FIXED
+  // -----------------------------
+
+  function parseHash() {
+    let h = window.location.hash || "";
+    if (h.startsWith("#")) h = h.slice(1);
+    if (!h) return { view: null, query: {} };
+    const [path, qsPart] = h.split("?");
+    const query = {};
+    if (qsPart) {
+      for (const [k, v] of new URLSearchParams(qsPart).entries()) {
+        query[k] = v;
+      }
+    }
+    return { view: (path || null), query };
+  }
+
+  function hasView(view) {
+    if (!view) return false;
+    return !!document.getElementById(`view-${view}`);
+  }
+
+  function setActiveNav(view) {
+    document.querySelectorAll(".nav-link").forEach((a) => {
+      const v = a.getAttribute("data-view");
+      a.classList.toggle("active", v === view);
+    });
+  }
+
+  function showView(view) {
+    // Hide ALL views generically (no dependency on a hardcoded list)
+    document.querySelectorAll("section.view").forEach((sec) => sec.classList.add("hidden"));
+
+    // Show the requested view if it exists
+    const sec = document.getElementById(`view-${view}`);
+    if (sec) sec.classList.remove("hidden");
+
+    setActiveNav(view);
+  }
+
+  function firstAllowedView() {
+    const p = state.perms;
+
+    const candidates = [
+      { view: "users", ok: can(p, "users:admin") },
+      { view: "roles", ok: can(p, "roles:admin") },
+      { view: "plc", ok: can(p, "config:read") || can(p, "config:write") },
+      { view: "meta", ok: can(p, "config:read") || can(p, "config:write") },
+      { view: "alarms", ok: can(p, "alarms:admin") },
+      { view: "access", ok: can(p, "users:admin") || can(p, "roles:admin") },
+    ];
+
+    // If the candidate view doesn’t exist in HTML, skip it.
+    return candidates.find((c) => c.ok && hasView(c.view))?.view
+      || (hasView("users") ? "users" : (document.querySelector("section.view")?.id?.replace("view-", "") || "users"));
+  }
+
+  function navigate(view, query = {}) {
+    const qs = new URLSearchParams(query).toString();
+    window.location.hash = qs ? `#${view}?${qs}` : `#${view}`;
+  }
+
+  async function route() {
+    const { view, query } = parseHash();
+
+    // Accept ANY hash view that actually exists in the DOM.
+    const requested = hasView(view) ? view : null;
+    const target = requested || firstAllowedView();
+
+    // Client-side guards (UX only; server is authoritative)
+    if (target === "users" && !can(state.perms, "users:admin")) return navigate(firstAllowedView());
+    if (target === "roles" && !can(state.perms, "roles:admin")) return navigate(firstAllowedView());
+    if (target === "plc" && !(can(state.perms, "config:read") || can(state.perms, "config:write")))
+      return navigate(firstAllowedView());
+    if (target === "meta" && !(can(state.perms, "config:read") || can(state.perms, "config:write")))
+      return navigate(firstAllowedView());
+    if (target === "alarms" && !can(state.perms, "alarms:admin")) return navigate(firstAllowedView());
+    if (target === "access" && !(can(state.perms, "users:admin") || can(state.perms, "roles:admin")))
+      return navigate(firstAllowedView());
+    if (target === "alarm-log" && !can(state.perms, "alarms:admin")) return navigate(firstAllowedView());
+    if (target === "command-log" && !(can(state.perms, "command:read") || can(state.perms, "command:write")))
+      return navigate(firstAllowedView());
+
+    showView(target);
+
+    if (target === "users") await usersView.show();
+    if (target === "roles") await rolesView.show();
+    if (target === "plc") await plcView.show();
+    if (target === "meta") await metaView.show();
+    if (target === "alarms") await alarmsView.show();
+    if (target === "access") await accessView.show(query);
+    if (target === "alarm-log") await loadAlarmLog();
+    if (target === "command-log") await loadCommandLog();
+  }
+
+
+  // -----------------------------
+  // Auth / bootstrap
+  // -----------------------------
+  async function initLoginPage() {
+    const form = $("login-form");
+    const statusEl = $("login-status");
+    if (!form) return;
+
+    // If already logged in, go to panel.
+    const existing = authStore.get();
+    if (existing?.access_token) {
+      try {
+        await api.get("/auth/me");
+        window.location.href = "/admin-panel";
+        return;
+      } catch {
+        // ignore
+      }
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      setStatus(statusEl, "Signing in…");
+
+      const fd = new FormData(form);
+      const username = String(fd.get("username") || "").trim();
+      const password = String(fd.get("password") || "");
+      const remember = !!fd.get("remember");
+
+      try {
+        const data = await api.post("/auth/login", { json: { username, password }, skipAuth: true });
+        authStore.set(data, remember);
+        window.location.href = "/admin-panel";
+      } catch (err) {
+        setStatus(statusEl, err?.message || "Login failed", "error");
+      }
+    });
+  }
+
+  // -----------------------------
+  // Alarm Log loader + bindings
+  // -----------------------------
+  async function loadAlarmLog() {
+    setStatus('alarm-log-status', 'Loading...', '');
+    try {
+      const severity = $('alarm-log-severity') ? $('alarm-log-severity').value : undefined;
+      const acked = $('alarm-log-acked') ? ($('alarm-log-acked').checked ? true : undefined) : undefined;
+      const q = { limit: state.alarmLog.limit, offset: state.alarmLog.offset };
+      if (severity) q.severity = severity;
+      if (acked !== undefined) q.acked = acked;
+
+      const data = await api.get('/admin/alarms', { query: q });
+      state.alarmLog.items = Array.isArray(data.items) ? data.items : [];
+      state.alarmLog.total = data.total || 0;
+
+      const tbody = $('alarm-log-table').querySelector('tbody');
+      tbody.innerHTML = '';
+      for (const a of state.alarmLog.items) {
+        const tr = document.createElement('tr');
+        tr.appendChild(el('td', {}, [new Date(a.ts).toLocaleString()]));
+        tr.appendChild(el('td', {}, [a.severity || '']));
+        tr.appendChild(el('td', {}, [a.message || '']));
+        tr.appendChild(el('td', {}, [a.source || '']));
+        tr.appendChild(el('td', {}, [a.acked ? (a.acked_at ? `Yes (${new Date(a.acked_at).toLocaleString()})` : 'Yes') : 'No']));
+
+        const actions = el('td', {});
+        if (!a.acked && can(state.perms, 'alarms:admin')) {
+          const ackBtn = el('button', { class: 'btn', text: 'Acknowledge' });
+          ackBtn.addEventListener('click', async () => {
+            try {
+              await api.post(`/alarms/${a.alarm_id}/ack`, { json: {} });
+              toast('Alarm acknowledged');
+              await loadAlarmLog();
+            } catch (e) {
+              toast(String(e), 'error');
+            }
+          });
+          actions.appendChild(ackBtn);
+        }
+        tr.appendChild(actions);
+        tbody.appendChild(tr);
+      }
+
+      setStatus('alarm-log-status', `Showing ${state.alarmLog.items.length} of ${state.alarmLog.total}`, 'ok');
+    } catch (e) {
+      setStatus('alarm-log-status', `Error loading alarm log: ${e}`, 'error');
+    }
+  }
+
+  document.addEventListener('click', (ev) => {
+    if (ev.target && ev.target.id === 'btn-alarm-log-refresh') {
+      loadAlarmLog();
+    }
+    if (ev.target && ev.target.id === 'btn-command-log-refresh') {
+      loadCommandLog(true);
+    }
+  });
+
+  document.addEventListener('change', (ev) => {
+    if (ev.target && (ev.target.id === 'alarm-log-severity' || ev.target.id === 'alarm-log-acked')) {
+      loadAlarmLog();
+    }
+  });
+
+  function commandLogSortDesc(a, b) {
+    const ta = Date.parse(a.time || "") || 0;
+    const tb = Date.parse(b.time || "") || 0;
+    return tb - ta;
+  }
+
+  function normalizeCommandLogItem(msg) {
+    const cmd = msg?.command || {};
+    const evt = msg?.event || {};
+    return {
+      command_id: cmd.command_id,  // Keep for deduplication
+      time: evt.ts || cmd.time || new Date().toISOString(),
+      plc: cmd.plc || cmd.plc_name || "",
+      container: cmd.container || "",
+      equipment: cmd.equipment || "",
+      data_point_label: cmd.data_point_label || cmd.datapoint || "",
+      bit_label: cmd.bit_label,
+      bit: cmd.bit,
+      value: cmd.value,
+      status: evt.status || cmd.status || "",
+      attempts: Number(cmd.attempts || 0),
+      username: cmd.username || "",
+      client_ip: cmd.client_ip || "",
+      error_message: evt.message || cmd.error_message || "",
+    };
+  }
+
+  function upsertCommandLogItem(item) {
+    if (!item || !item.command_id) return;
+    const rows = state.commandLog.items || [];
+    const idx = rows.findIndex((r) => r.command_id === item.command_id);
+    if (idx >= 0) rows[idx] = { ...rows[idx], ...item };
+    else rows.unshift(item);
+    rows.sort(commandLogSortDesc);
+    if (rows.length > state.commandLog.limit) rows.length = state.commandLog.limit;
+    state.commandLog.items = rows;
+    state.commandLog.total = Math.max(Number(state.commandLog.total || 0), rows.length);
+  }
+
+  function renderCommandLog() {
+    const table = $("command-log-table");
+    if (!table) return;
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const rows = Array.isArray(state.commandLog.items) ? state.commandLog.items : [];
+    if (!rows.length) {
+      tbody.appendChild(
+        el("tr", {}, [
+          el("td", { colspan: "11", class: "muted", text: "No command events yet." }),
+        ])
+      );
+      return;
+    }
+
+    for (const r of rows) {
+      const tr = el("tr", {}, [
+        el("td", { text: r.time ? new Date(r.time).toLocaleString() : "" }),
+        el("td", { text: String(r.plc || "") }),
+        el("td", { text: String(r.container || "") }),
+        el("td", { text: String(r.equipment || "") }),
+        el("td", { text: String(r.data_point_label || "") }),
+        el("td", { text: String(r.bit_label || "") }),
+        el("td", { text: String(r.value !== undefined && r.value !== null ? r.value : "") }),
+        el("td", { text: String(r.status || "") }),
+        el("td", { text: String(r.attempts ?? "") }),
+        el("td", { text: String(r.username || "") }),
+        el("td", { text: String(r.client_ip || "") }),
+      ]);
+      tbody.appendChild(tr);
+    }
+  }
+
+  function onCommandLogMessage(msg) {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "snapshot" && msg.channel === "commands") {
+      const items = Array.isArray(msg.items) ? msg.items.map(normalizeCommandLogItem) : [];
+      state.commandLog.items = items.sort(commandLogSortDesc).slice(0, state.commandLog.limit);
+      state.commandLog.total = state.commandLog.items.length;
+      renderCommandLog();
+      setStatus("command-log-status", `Live: ${state.commandLog.items.length} command event(s)`, "ok");
+      return;
+    }
+    if (msg.type === "command_log") {
+      upsertCommandLogItem(normalizeCommandLogItem(msg));
+      renderCommandLog();
+      setStatus("command-log-status", `Live: ${state.commandLog.items.length} command event(s)`, "ok");
+    }
+  }
+
+  function scheduleCommandLogReconnect() {
+    if (state.commandLog.ws.retryTimer) return;
+    state.commandLog.ws.retryTimer = window.setTimeout(() => {
+      state.commandLog.ws.retryTimer = null;
+      startCommandLogStream();
+    }, 3000);
+  }
+
+  function startCommandLogStream() {
+    if (!(can(state.perms, "command:read") || can(state.perms, "command:write") || can(state.perms, "command:*"))) {
+      return;
+    }
+    if (state.commandLog.ws.socket && state.commandLog.ws.socket.readyState <= 1) return;
+
+    const token = authStore.accessToken();
+    if (!token) return;
+
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${proto}://${window.location.host}/ws/commands`;
+    const ws = new WebSocket(wsUrl);
+    state.commandLog.ws.socket = ws;
+
+    ws.addEventListener("open", () => {
+      try {
+        ws.send(JSON.stringify({ type: "auth", access_token: token }));
+      } catch {
+        // ignore
+      }
+      setStatus("command-log-status", "Connected to command stream…", "");
+    });
+
+    ws.addEventListener("message", (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data || "{}"));
+        onCommandLogMessage(msg);
+      } catch {
+        // ignore malformed payload
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      state.commandLog.ws.socket = null;
+      scheduleCommandLogReconnect();
+    });
+
+    ws.addEventListener("error", () => {
+      setStatus("command-log-status", "Command stream disconnected. Retrying…", "error");
+      try {
+        ws.close();
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  async function loadCommandLog(force = false) {
+    const canRead = can(state.perms, "command:read") || can(state.perms, "command:*");
+    if (!force && state.commandLog.items.length) {
+      renderCommandLog();
+      startCommandLogStream();
+      return;
+    }
+
+    if (!canRead) {
+      state.commandLog.items = [];
+      state.commandLog.total = 0;
+      renderCommandLog();
+      setStatus("command-log-status", "Live mode enabled (no command:read permission for history).", "ok");
+      startCommandLogStream();
+      return;
+    }
+
+    setStatus("command-log-status", "Loading command history…", "");
+    try {
+      const data = await api.get('/logs/commands', {
+        query: {
+          limit: state.commandLog.limit,
+          offset: state.commandLog.offset,
+        },
+      });
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      state.commandLog.items = items
+        .map((r) => ({
+          command_id: r.command_id,
+          time: r.time,
+          plc: r.plc,
+          container: r.container,
+          equipment: r.equipment,
+          data_point_label: r.data_point_label,
+          bit_label: r.bit_label,
+          bit: r.bit,
+          value: r.value,
+          status: r.status,
+          attempts: Number(r.attempts || 0),
+          username: r.username,
+          client_ip: r.client_ip,
+          error_message: r.error_message,
+        }))
+        .sort(commandLogSortDesc)
+        .slice(0, state.commandLog.limit);
+      state.commandLog.total = Number(data.total || state.commandLog.items.length);
+
+      renderCommandLog();
+      setStatus("command-log-status", `Showing ${state.commandLog.items.length} of ${state.commandLog.total}`, "ok");
+    } catch (e) {
+      setStatus("command-log-status", `Error loading command log: ${e}`, "error");
+    }
+
+    startCommandLogStream();
+  }
+
+  async function initAdminApp() {
+    const meName = $("me-name");
+    const logoutBtn = $("logout-btn");
+
+    try {
+      const me = await api.get("/auth/me");
+      state.me = me;
+      state.perms = new Set(me.permissions || []);
+      if (meName) meName.textContent = me.username || "user";
+    } catch {
+      authStore.clear();
+      window.location.href = "/admin-panel/login";
+      return;
+    }
+
+    // Hide nav items based on permissions (UX only).
+    const navByView = {
+      users: can(state.perms, "users:admin"),
+      roles: can(state.perms, "roles:admin"),
+      plc: can(state.perms, "config:read") || can(state.perms, "config:write"),
+      meta: can(state.perms, "config:read") || can(state.perms, "config:write"),
+      access: can(state.perms, "users:admin") || can(state.perms, "roles:admin"),
+      alarms: can(state.perms, "alarms:admin"),
+      "alarm-log": can(state.perms, "alarms:admin"),
+      "command-log": can(state.perms, "command:read") || can(state.perms, "command:write"),
+    };
+    document.querySelectorAll(".nav-link").forEach((a) => {
+      const v = a.getAttribute("data-view");
+      if (v && v in navByView) {
+        a.classList.toggle("hidden", !navByView[v]);
+      }
+    });
+
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", async () => {
+        try {
+          const refresh_token = authStore.refreshToken();
+          if (refresh_token) await api.post("/auth/logout", { json: { refresh_token } });
+        } catch {
+          // ignore
+        }
+        authStore.clear();
+        window.location.href = "/admin-panel/login";
+      });
+    }
+
+    window.addEventListener("hashchange", () => route());
+    startCommandLogStream();
+    await route();
+  }
+
+  // -----------------------------
+  // Users view
+  // -----------------------------
+  const usersView = (() => {
+    let initialized = false;
+
+    function bind() {
+      const btnNew = $("btn-user-new");
+      const btnRefresh = $("btn-users-refresh");
+      const search = $("users-search");
+      const filter = $("users-filter-active");
+      const table = $("users-table");
+      const form = $("form-user");
+      const resetForm = $("form-reset-password");
+
+      btnNew?.addEventListener("click", () => openUserModal(null));
+      btnRefresh?.addEventListener("click", () => load(true));
+
+      search?.addEventListener("input", () => render());
+      filter?.addEventListener("change", () => render());
+
+      table?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        const userId = clampInt(btn.dataset.userId, 0);
+        const action = btn.dataset.action;
+        const user = state.users.find((u) => u.id === userId);
+        if (!user) return;
+
+        if (action === "edit") openUserModal(user);
+        if (action === "password") openResetPasswordModal(user);
+        if (action === "toggle") await toggleActive(user);
+        if (action === "access") navigate("access", { principal: "user", id: String(user.id) });
+      });
+
+      form?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitUserForm();
+      });
+
+      resetForm?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitResetPassword();
+      });
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      await load(false);
+    }
+
+    async function load(force) {
+      if (!force && state.users.length) {
+        render();
+        return;
+      }
+      setStatus("users-status", "Loading…");
+      try {
+        const users = await api.get("/admin/users");
+        state.users = Array.isArray(users) ? users : [];
+        setStatus("users-status", `Loaded ${state.users.length} users.`, "ok");
+      } catch (err) {
+        setStatus("users-status", err?.message || "Failed to load users", "error");
+      }
+      await ensureRolesForUserEditor();
+      render();
+    }
+
+    async function ensureRolesForUserEditor() {
+      // Role assignment in the user modal uses role names.
+      // If the viewer cannot list roles, we keep the selector empty and only allow password/active updates.
+      const help = $("user-roles-help");
+      const select = $("user-roles");
+      if (!select) return;
+
+      if (!can(state.perms, "roles:admin")) {
+        help && (help.textContent = "You don't have permission to list roles.");
+        select.innerHTML = "";
+        select.disabled = true;
+        return;
+      }
+
+      try {
+        const roles = await api.get("/admin/roles");
+        state.roles = Array.isArray(roles) ? roles : [];
+        select.innerHTML = "";
+        for (const r of state.roles) {
+          select.appendChild(el("option", { value: r.name, text: r.name }));
+        }
+        select.disabled = false;
+        help && (help.textContent = "");
+      } catch (err) {
+        help && (help.textContent = err?.message || "Failed to load roles");
+        select.innerHTML = "";
+        select.disabled = true;
+      }
+    }
+
+    function filteredUsers() {
+      const term = String($("users-search")?.value || "").trim().toLowerCase();
+      const filter = String($("users-filter-active")?.value || "all");
+      return (state.users || [])
+        .filter((u) => {
+          if (!term) return true;
+          return String(u.username || "").toLowerCase().includes(term);
+        })
+        .filter((u) => {
+          if (filter === "active") return !!u.is_active;
+          if (filter === "inactive") return !u.is_active;
+          return true;
+        });
+    }
+
+    function render() {
+      const tbody = qs("#users-table tbody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rows = filteredUsers();
+      if (!rows.length) {
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { colspan: "5", class: "muted", text: "No users found." }),
+          ])
+        );
+        return;
+      }
+
+      for (const u of rows) {
+        const rolesText = formatList(u.roles || []);
+        const actions = el("div", { class: "actions-group" }, [
+          el("button", { class: "btn small", "data-action": "edit", "data-user-id": u.id, text: "Edit" }),
+          el("button", {
+            class: "btn small",
+            "data-action": "password",
+            "data-user-id": u.id,
+            text: "Password",
+          }),
+          el("button", {
+            class: "btn small",
+            "data-action": "toggle",
+            "data-user-id": u.id,
+            text: u.is_active ? "Deactivate" : "Activate",
+          }),
+          el("button", {
+            class: "btn small",
+            "data-action": "access",
+            "data-user-id": u.id,
+            text: "Access",
+          }),
+        ]);
+
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { text: String(u.id) }),
+            el("td", { text: String(u.username || "") }),
+            el("td", { text: u.is_active ? "Yes" : "No" }),
+            el("td", { text: rolesText }),
+            el("td", { class: "actions-col" }, [actions]),
+          ])
+        );
+      }
+    }
+
+    function openUserModal(user) {
+      const dlg = $("modal-user");
+      const form = $("form-user");
+      if (!dlg || !form) return;
+
+      setStatus("modal-user-status", "");
+      form.reset();
+
+      const title = $("modal-user-title");
+      const usernameInput = form.querySelector('input[name="username"]');
+      const passwordInput = form.querySelector('input[name="password"]');
+      const activeInput = form.querySelector('input[name="is_active"]');
+      const idInput = form.querySelector('input[name="id"]');
+      const rolesSelect = $("user-roles");
+
+      if (user) {
+        title && (title.textContent = `Edit User #${user.id}`);
+        idInput.value = String(user.id);
+        usernameInput.value = user.username || "";
+        usernameInput.disabled = true;
+        activeInput.checked = !!user.is_active;
+        passwordInput.required = false;
+        passwordInput.value = "";
+        // roles
+        if (rolesSelect && !rolesSelect.disabled) {
+          const roleNames = new Set(user.roles || []);
+          for (const opt of Array.from(rolesSelect.options)) {
+            opt.selected = roleNames.has(opt.value);
+          }
+        }
+      } else {
+        title && (title.textContent = "New User");
+        idInput.value = "";
+        usernameInput.value = "";
+        usernameInput.disabled = false;
+        activeInput.checked = true;
+        passwordInput.required = true;
+        passwordInput.value = "";
+        if (rolesSelect && !rolesSelect.disabled) {
+          for (const opt of Array.from(rolesSelect.options)) opt.selected = false;
+        }
+      }
+
+      openDialog(dlg);
+    }
+
+    async function submitUserForm() {
+      const form = $("form-user");
+      if (!form) return;
+
+      const statusEl = $("modal-user-status");
+      setStatus(statusEl, "Saving…");
+
+      const fd = new FormData(form);
+      const id = String(fd.get("id") || "").trim();
+      const username = String(fd.get("username") || "").trim();
+      const password = String(fd.get("password") || "");
+      const is_active = !!fd.get("is_active");
+
+      const rolesSelect = $("user-roles");
+      let roles = null;
+      if (rolesSelect && !rolesSelect.disabled) {
+        roles = Array.from(rolesSelect.selectedOptions).map((o) => o.value);
+      }
+
+      try {
+        if (!id) {
+          const payload = { username, password, roles: roles || [] };
+          await api.post("/admin/users", { json: payload });
+          toast("User created");
+        } else {
+          const userId = clampInt(id, 0);
+          const payload = { is_active };
+          if (password) payload.password = password;
+          if (roles !== null) payload.roles = roles;
+          await api.put(`/admin/users/${userId}`, { json: payload });
+          toast("User updated");
+        }
+
+        closeDialog("modal-user");
+        await load(true);
+      } catch (err) {
+        setStatus(statusEl, err?.message || "Failed to save user", "error");
+      }
+    }
+
+    function openResetPasswordModal(user) {
+      const dlg = $("modal-reset-password");
+      const form = $("form-reset-password");
+      if (!dlg || !form) return;
+
+      form.reset();
+      setStatus("modal-reset-status", "");
+
+      form.querySelector('input[name="id"]').value = String(user.id);
+      const label = $("reset-user-label");
+      label && (label.textContent = `User: ${user.username} (#${user.id})`);
+
+      openDialog(dlg);
+    }
+
+    async function submitResetPassword() {
+      const form = $("form-reset-password");
+      if (!form) return;
+
+      const statusEl = $("modal-reset-status");
+      setStatus(statusEl, "Updating…");
+
+      const fd = new FormData(form);
+      const userId = clampInt(fd.get("id"), 0);
+      const password = String(fd.get("password") || "");
+
+      try {
+        await api.post(`/admin/users/${userId}/reset-password`, { json: { password } });
+        toast("Password updated");
+        closeDialog("modal-reset-password");
+      } catch (err) {
+        setStatus(statusEl, err?.message || "Failed to reset password", "error");
+      }
+    }
+
+    async function toggleActive(user) {
+      const next = !user.is_active;
+      const msg = next ? `Activate user "${user.username}"?` : `Deactivate user "${user.username}"?`;
+      if (!confirmDanger(msg)) return;
+
+      try {
+        await api.put(`/admin/users/${user.id}`, { json: { is_active: next } });
+        toast(next ? "User activated" : "User deactivated");
+        await load(true);
+      } catch (err) {
+        toast(err?.message || "Failed to update user", "error");
+      }
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Roles view
+  // -----------------------------
+  const rolesView = (() => {
+    let initialized = false;
+    let selectedRoleId = null;
+
+    function bind() {
+      const btnNew = $("btn-role-new");
+      const btnRefresh = $("btn-roles-refresh");
+      const search = $("roles-search");
+      const table = $("roles-table");
+      const form = $("form-role");
+      const btnPermAdd = $("btn-perm-add");
+      const btnRoleDelete = $("btn-role-delete");
+      const btnRoleAccess = $("btn-role-access");
+
+      btnNew?.addEventListener("click", () => openRoleModal(null));
+      btnRefresh?.addEventListener("click", () => load(true));
+      search?.addEventListener("input", () => render());
+
+      table?.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) {
+          // Row select
+          const tr = ev.target.closest("tr[data-role-id]");
+          if (!tr) return;
+          const roleId = clampInt(tr.dataset.roleId, 0);
+          selectRole(roleId);
+          return;
+        }
+        const roleId = clampInt(btn.dataset.roleId, 0);
+        const action = btn.dataset.action;
+        const role = state.roles.find((r) => r.id === roleId);
+        if (!role) return;
+
+        if (action === "edit") openRoleModal(role);
+        if (action === "access") navigate("access", { principal: "role", id: String(role.id) });
+        if (action === "select") selectRole(role.id);
+      });
+
+      form?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitRoleForm();
+      });
+
+      btnPermAdd?.addEventListener("click", async () => {
+        if (!selectedRoleId) return;
+        const input = $("perm-input");
+        const perm = String(input?.value || "").trim();
+        if (!perm) return;
+        await addPermission(selectedRoleId, perm);
+        input.value = "";
+      });
+
+      btnRoleDelete?.addEventListener("click", async () => {
+        if (!selectedRoleId) return;
+        const role = state.roles.find((r) => r.id === selectedRoleId);
+        if (!role) return;
+        if (!confirmDanger(`Delete role "${role.name}"? This cannot be undone.`)) return;
+
+        try {
+          await api.delete(`/admin/roles/${role.id}`);
+          toast("Role deleted");
+          selectedRoleId = null;
+          renderRoleEditor(null);
+          await load(true);
+        } catch (err) {
+          toast(err?.message || "Failed to delete role", "error");
+        }
+      });
+
+      btnRoleAccess?.addEventListener("click", () => {
+        if (!selectedRoleId) return;
+        navigate("access", { principal: "role", id: String(selectedRoleId) });
+      });
+
+      const permList = $("perm-list");
+      permList?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-perm]");
+        if (!btn) return;
+        if (!selectedRoleId) return;
+        const perm = btn.dataset.perm;
+        await removePermission(selectedRoleId, perm);
+      });
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      await load(false);
+    }
+
+    async function load(force) {
+      if (!force && state.roles.length) {
+        render();
+        return;
+      }
+      setStatus("roles-status", "Loading…");
+      try {
+        const roles = await api.get("/admin/roles");
+        state.roles = Array.isArray(roles) ? roles : [];
+        setStatus("roles-status", `Loaded ${state.roles.length} roles.`, "ok");
+      } catch (err) {
+        setStatus("roles-status", err?.message || "Failed to load roles", "error");
+        state.roles = [];
+      }
+      render();
+      // re-select after refresh if possible
+      if (selectedRoleId) selectRole(selectedRoleId, { silent: true });
+    }
+
+    function filteredRoles() {
+      const term = String($("roles-search")?.value || "").trim().toLowerCase();
+      return (state.roles || []).filter((r) => {
+        if (!term) return true;
+        return String(r.name || "").toLowerCase().includes(term);
+      });
+    }
+
+    function render() {
+      const tbody = qs("#roles-table tbody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const roles = filteredRoles();
+      if (!roles.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "5", class: "muted", text: "No roles found." })]));
+        return;
+      }
+
+      for (const r of roles) {
+        const permCount = (r.permissions || []).length;
+        const actions = el("div", { class: "actions-group" }, [
+          el("button", { class: "btn small", "data-action": "select", "data-role-id": r.id, text: "Select" }),
+          el("button", { class: "btn small", "data-action": "edit", "data-role-id": r.id, text: "Edit" }),
+          el("button", { class: "btn small", "data-action": "access", "data-role-id": r.id, text: "Access" }),
+        ]);
+
+        const tr = el(
+          "tr",
+          { dataset: { roleId: String(r.id) } },
+          [
+            el("td", { text: String(r.id) }),
+            el("td", { text: String(r.name || "") }),
+            el("td", { text: String(r.description || "") }),
+            el("td", { text: String(permCount) }),
+            el("td", { class: "actions-col" }, [actions]),
+          ]
+        );
+        if (selectedRoleId === r.id) tr.classList.add("selected");
+        tbody.appendChild(tr);
+      }
+    }
+
+    function selectRole(roleId, opts = {}) {
+      selectedRoleId = roleId;
+      const role = state.roles.find((r) => r.id === roleId) || null;
+      renderRoleEditor(role);
+      if (!opts.silent) toast(`Selected role: ${role?.name || roleId}`);
+    }
+
+    function renderRoleEditor(role) {
+      const editor = $("role-editor");
+      const name = $("role-editor-name");
+      const permList = $("perm-list");
+      const permInput = $("perm-input");
+
+      if (!editor || !name || !permList || !permInput) return;
+
+      if (!role) {
+        editor.classList.add("hidden");
+        name.textContent = "";
+        permList.innerHTML = "";
+        permInput.value = "";
+        return;
+      }
+
+      editor.classList.remove("hidden");
+      name.textContent = `${role.name} (#${role.id})`;
+      permList.innerHTML = "";
+
+      for (const perm of role.permissions || []) {
+        const li = el("li", {}, [
+          el("span", { text: perm }),
+          el("button", {
+            class: "btn small danger",
+            type: "button",
+            dataset: { perm },
+            text: "×",
+          }),
+        ]);
+        permList.appendChild(li);
+      }
+    }
+
+    function openRoleModal(role) {
+      const dlg = $("modal-role");
+      const form = $("form-role");
+      if (!dlg || !form) return;
+
+      setStatus("modal-role-status", "");
+      form.reset();
+
+      const title = $("modal-role-title");
+      const idInput = form.querySelector('input[name="id"]');
+      const nameInput = form.querySelector('input[name="name"]');
+      const descInput = form.querySelector('input[name="description"]');
+
+      if (role) {
+        title && (title.textContent = `Edit Role #${role.id}`);
+        idInput.value = String(role.id);
+        nameInput.value = role.name || "";
+        descInput.value = role.description || "";
+      } else {
+        title && (title.textContent = "New Role");
+        idInput.value = "";
+        nameInput.value = "";
+        descInput.value = "";
+      }
+
+      openDialog(dlg);
+    }
+
+    async function submitRoleForm() {
+      const form = $("form-role");
+      if (!form) return;
+
+      const statusEl = $("modal-role-status");
+      setStatus(statusEl, "Saving…");
+
+      const fd = new FormData(form);
+      const id = String(fd.get("id") || "").trim();
+      const name = String(fd.get("name") || "").trim();
+      const description = String(fd.get("description") || "").trim();
+
+      try {
+        if (!id) {
+          await api.post("/admin/roles", { json: { name, description: description || null } });
+          toast("Role created");
+        } else {
+          const roleId = clampInt(id, 0);
+          await api.put(`/admin/roles/${roleId}`, { json: { name, description: description || null } });
+          toast("Role updated");
+        }
+
+        closeDialog("modal-role");
+        await load(true);
+      } catch (err) {
+        setStatus(statusEl, err?.message || "Failed to save role", "error");
+      }
+    }
+
+    async function addPermission(roleId, perm) {
+      try {
+        await api.post(`/admin/roles/${roleId}/permissions`, { json: { permission: perm } });
+        toast("Permission added");
+        await load(true);
+        selectRole(roleId, { silent: true });
+      } catch (err) {
+        toast(err?.message || "Failed to add permission", "error");
+      }
+    }
+
+    async function removePermission(roleId, perm) {
+      if (!confirmDanger(`Remove permission "${perm}"?`)) return;
+      try {
+        await api.delete(`/admin/roles/${roleId}/permissions/${encodeURIComponent(perm)}`);
+        toast("Permission removed");
+        await load(true);
+        selectRole(roleId, { silent: true });
+      } catch (err) {
+        toast(err?.message || "Failed to remove permission", "error");
+      }
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // PLC Builder view
+  // -----------------------------
+  const plcView = (() => {
+    let initialized = false;
+
+    function bind() {
+      $("btn-plc-refresh")?.addEventListener("click", () => loadTree(true));
+      $("btn-plc-add")?.addEventListener("click", () => openDialog("modal-plc"));
+      $("cfg-search")?.addEventListener("input", () => renderTree());
+
+      $("cfg-tree")?.addEventListener("click", (ev) => {
+        const twisty = ev.target.closest("button[data-toggle]");
+        if (twisty) {
+          ev.stopPropagation();
+          const key = twisty.dataset.toggle;
+          if (state.cfgCollapsed.has(key)) state.cfgCollapsed.delete(key);
+          else state.cfgCollapsed.add(key);
+          renderTree();
+          return;
+        }
+
+        const nodeEl = ev.target.closest("[data-node-key]");
+        if (!nodeEl) return;
+        const key = nodeEl.dataset.nodeKey;
+        const info = state.cfgIndex.get(key);
+        if (!info) return;
+        if (info.type === "datapoint") return; // plc builder selects only structure nodes
+
+        state.cfgSelectedKey = key;
+        renderTree();
+        renderDetails();
+      });
+
+      $("btn-node-save")?.addEventListener("click", () => saveSelectedNode());
+      $("btn-node-delete")?.addEventListener("click", () => deleteSelectedNode());
+
+      $("form-plc")?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await createPlc();
+      });
+
+      $("form-add-child")?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitChildForm();
+      });
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      await loadTree(false);
+    }
+
+    async function loadTree(force) {
+      if (!force && state.cfgTree.length) {
+        renderTree();
+        renderDetails();
+        return;
+      }
+      setStatus("plc-status", "Loading…");
+      try {
+        const tree = await api.get("/api/config/tree");
+        state.cfgTree = Array.isArray(tree) ? tree : [];
+        indexTree();
+        if (state.cfgSelectedKey && !state.cfgIndex.has(state.cfgSelectedKey)) state.cfgSelectedKey = null;
+        setStatus("plc-status", `Loaded ${state.cfgTree.length} PLC(s).`, "ok");
+      } catch (err) {
+        state.cfgTree = [];
+        state.cfgIndex = new Map();
+        setStatus("plc-status", err?.message || "Failed to load tree", "error");
+      }
+      renderTree();
+      renderDetails();
+    }
+
+    function indexTree() {
+      state.cfgIndex = new Map();
+
+      const add = (type, raw, parentKey = null) => {
+        const id = clampInt(raw.id, 0);
+        const key = `${type}:${id}`;
+        const name =
+          type === "plc"
+            ? raw.name
+            : type === "container"
+            ? raw.name
+            : type === "equipment"
+            ? raw.name
+            : type === "datapoint"
+            ? raw.label
+            : String(raw.name || raw.label || "");
+        state.cfgIndex.set(key, { key, type, id, name, parentKey, raw });
+        return key;
+      };
+
+      for (const plc of state.cfgTree) {
+        const plcKey = add("plc", plc, null);
+
+        for (const dp of plc.datapoints || []) {
+          add("datapoint", dp, plcKey);
+        }
+
+        for (const c of plc.containers || []) {
+          const cKey = add("container", c, plcKey);
+
+          for (const dp of c.datapoints || []) {
+            add("datapoint", dp, cKey);
+          }
+
+          for (const e of c.equipment || []) {
+            const eKey = add("equipment", e, cKey);
+
+            for (const dp of e.datapoints || []) {
+              add("datapoint", dp, eKey);
+            }
+          }
+        }
+      }
+    }
+
+    function treeCounts(plcRaw) {
+      let containers = 0;
+      let equipment = 0;
+      let datapoints = 0;
+
+      for (const c of plcRaw.containers || []) {
+        containers += 1;
+        datapoints += (c.datapoints || []).length;
+        for (const e of c.equipment || []) {
+          equipment += 1;
+          datapoints += (e.datapoints || []).length;
+        }
+      }
+      datapoints += (plcRaw.datapoints || []).length;
+      return { containers, equipment, datapoints };
+    }
+
+    function renderTree() {
+      const root = $("cfg-tree");
+      if (!root) return;
+
+      const term = String($("cfg-search")?.value || "").trim().toLowerCase();
+      root.innerHTML = "";
+
+      const build = (node, type, parentKey) => {
+        const id = clampInt(node.id, 0);
+        const key = `${type}:${id}`;
+        const info = state.cfgIndex.get(key);
+        if (!info) return null;
+
+        const children = [];
+        if (type === "plc") {
+          for (const c of node.containers || []) {
+            const child = build(c, "container", key);
+            if (child) children.push(child);
+          }
+        } else if (type === "container") {
+          for (const e of node.equipment || []) {
+            const child = build(e, "equipment", key);
+            if (child) children.push(child);
+          }
+        }
+
+        // Filter logic: show node if it matches or any child matches
+        const label = String(info.name || "").toLowerCase();
+        const selfMatch = !term || label.includes(term);
+        const anyChildMatch = children.some((c) => c._matched);
+        const matched = selfMatch || anyChildMatch;
+        if (!matched) return null;
+
+        const hasChildren = children.length > 0;
+
+        const left = el("div", { class: "left" }, [
+          hasChildren
+            ? el("button", { class: "twisty", type: "button", dataset: { toggle: key }, text: state.cfgCollapsed.has(key) ? "▸" : "▾" })
+            : el("span", { class: "badge", text: " " }),
+          el("span", { class: "title", text: info.name || `${type} ${id}` }),
+          el("span", { class: "badge", text: type }),
+        ]);
+
+        const metaChildren = [];
+        if (type === "plc") {
+          const c = treeCounts(node);
+          metaChildren.push(el("span", { class: "badge", text: `C:${c.containers}` }));
+          metaChildren.push(el("span", { class: "badge", text: `E:${c.equipment}` }));
+          metaChildren.push(el("span", { class: "badge", text: `DP:${c.datapoints}` }));
+        } else if (type === "container") {
+          metaChildren.push(el("span", { class: "badge", text: `type:${node.containerType || ""}` }));
+          metaChildren.push(el("span", { class: "badge", text: `E:${(node.equipment || []).length}` }));
+          metaChildren.push(el("span", { class: "badge", text: `DP:${(node.datapoints || []).length}` }));
+        } else if (type === "equipment") {
+          metaChildren.push(el("span", { class: "badge", text: `type:${node.equipmentType || ""}` }));
+          metaChildren.push(el("span", { class: "badge", text: `DP:${(node.datapoints || []).length}` }));
+        }
+
+        const row = el("div", { class: "node", dataset: { nodeKey: key } }, [
+          left,
+          el("div", { class: "meta" }, metaChildren),
+        ]);
+
+        if (state.cfgSelectedKey === key) row.classList.add("selected");
+
+        const container = el("div", {}, [row]);
+
+        if (hasChildren) {
+          const childrenWrap = el("div", { class: "children" }, children.map((c) => c.el));
+          if (state.cfgCollapsed.has(key)) childrenWrap.classList.add("hidden");
+          container.appendChild(childrenWrap);
+        }
+
+        return { el: container, _matched: matched };
+      };
+
+      for (const plc of state.cfgTree) {
+        const nodeEl = build(plc, "plc", null);
+        if (nodeEl) root.appendChild(nodeEl.el);
+      }
+    }
+
+    function renderDetails() {
+      const editor = $("node-editor");
+      const statusEl = $("node-status");
+      if (!editor) return;
+
+      setStatus(statusEl, "");
+
+      const saveBtn = $("btn-node-save");
+      const delBtn = $("btn-node-delete");
+
+      if (!state.cfgSelectedKey) {
+        editor.classList.add("muted");
+        editor.innerHTML = "Select a node from the tree.";
+        saveBtn && (saveBtn.disabled = true);
+        delBtn && (delBtn.disabled = true);
+        return;
+      }
+
+      const info = state.cfgIndex.get(state.cfgSelectedKey);
+      if (!info) return;
+
+      saveBtn && (saveBtn.disabled = !can(state.perms, "config:write"));
+      delBtn && (delBtn.disabled = !can(state.perms, "config:write"));
+
+      const node = info.raw;
+
+      const header = el("div", { class: "row" }, [
+        el("div", {}, [
+          el("div", { class: "muted", text: `${info.type.toUpperCase()} #${info.id}` }),
+          el("div", { style: "font-weight:700", text: info.name }),
+        ]),
+        el("div", { class: "actions" }, buildNodeActions(info)),
+      ]);
+
+      const form = el("div", { class: "form" }, buildNodeFormFields(info));
+
+      const dpSection =
+        info.type === "plc" || info.type === "container" || info.type === "equipment"
+          ? renderDatapointsSection(info)
+          : null;
+
+      editor.classList.remove("muted");
+      editor.innerHTML = "";
+      editor.appendChild(header);
+      editor.appendChild(form);
+      if (dpSection) editor.appendChild(dpSection);
+    }
+
+    function buildNodeActions(info) {
+      const actions = [];
+
+      if (can(state.perms, "config:write")) {
+        if (info.type === "plc") {
+          actions.push(
+            el("button", {
+              class: "btn small",
+              type: "button",
+              text: "Add Container",
+              onclick: () => openChildModal({ childType: "container", parentType: "plc", parentId: info.id }),
+            })
+          );
+        }
+        if (info.type === "container") {
+          actions.push(
+            el("button", {
+              class: "btn small",
+              type: "button",
+              text: "Add Equipment",
+              onclick: () => openChildModal({ childType: "equipment", parentType: "container", parentId: info.id }),
+            })
+          );
+        }
+        if (info.type === "plc" || info.type === "container" || info.type === "equipment") {
+          actions.push(
+            el("button", {
+              class: "btn small",
+              type: "button",
+              text: "Add DataPoint",
+              onclick: () => openChildModal({ childType: "datapoint", parentType: info.type, parentId: info.id }),
+            })
+          );
+        }
+      }
+
+      return actions;
+    }
+
+    function buildNodeFormFields(info) {
+      const node = info.raw;
+      const fields = [];
+
+      const inputRow = (label, inputEl) =>
+        el("label", {}, [
+          el("span", { class: "muted", text: label }),
+          inputEl,
+        ]);
+
+      const input = (name, value, attrs = {}) =>
+        el("input", { name, value: value ?? "", ...attrs });
+
+      if (info.type === "plc") {
+        fields.push(inputRow("Name", input("name", node.name)));
+        fields.push(inputRow("IP", input("ip", node.ip, { placeholder: "192.168.0.10" })));
+        fields.push(
+          inputRow(
+            "Port",
+            input("port", node.port, { type: "number", min: "1", max: "65535" })
+          )
+        );
+      } else if (info.type === "container") {
+        fields.push(inputRow("Name", input("name", node.name)));
+        fields.push(inputRow("Type", input("type", node.containerType || "")));
+        // Ensure groups are loaded (async; select will populate if already loaded)
+        if (!state.meta.loaded) {
+          ensureMetaLoaded(false).catch(() => {});
+        }
+        const containerGroupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat((state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name })))
+        );
+        containerGroupSel.value = node.groupId ? String(node.groupId) : "";
+        fields.push(el("label", {}, [el("span", { class: "muted", text: "Group" }), containerGroupSel]));
+      } else if (info.type === "equipment") {
+        fields.push(inputRow("Name", input("name", node.name)));
+        fields.push(inputRow("Type", input("type", node.equipmentType || "")));
+        // Ensure groups are loaded (async; select will populate if already loaded)
+        if (!state.meta.loaded) {
+          ensureMetaLoaded(false).catch(() => {});
+        }
+        const equipmentGroupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat((state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name })))
+        );
+        equipmentGroupSel.value = node.groupId ? String(node.groupId) : "";
+        fields.push(el("label", {}, [el("span", { class: "muted", text: "Group" }), equipmentGroupSel]));
+      }
+
+      // Wrap in a grid
+      return [
+        el("div", { class: "split", style: "grid-template-columns: 1fr 1fr" }, fields),
+        el("div", { class: "hint muted" }, [
+          can(state.perms, "config:write")
+            ? "Tip: Save updates the selected node. Deleting a node may require force delete if it has children/datapoints."
+            : "You have read-only configuration access.",
+        ]),
+      ];
+    }
+
+    function renderDatapointsSection(info) {
+      const node = info.raw;
+      const dps = node.datapoints || [];
+
+      const section = el("div", { style: "margin-top: 14px;" }, []);
+      section.appendChild(
+        el("div", { class: "row" }, [
+          el("h3", { text: "Data Points" }),
+          can(state.perms, "config:write")
+            ? el("button", {
+                class: "btn small primary",
+                type: "button",
+                text: "Add",
+                onclick: () => openChildModal({ childType: "datapoint", parentType: info.type, parentId: info.id }),
+              })
+            : el("span", { class: "muted", text: "" }),
+        ])
+      );
+
+      const table = el("table", { class: "table", style: "min-width: 0" }, []);
+      table.appendChild(
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", { text: "ID" }),
+            el("th", { text: "Label" }),
+            el("th", { text: "Cat" }),
+            el("th", { text: "Type" }),
+            el("th", { text: "Address" }),
+            el("th", { text: "" }),
+          ]),
+        ])
+      );
+
+      const tbody = el("tbody");
+      if (!dps.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No datapoints on this node." })]));
+      } else {
+        for (const dp of dps) {
+          const actions = el("div", { class: "actions-group" }, [
+            el("button", {
+              class: "btn small",
+              type: "button",
+              text: "Edit",
+              onclick: () => openChildModal({ childType: "datapoint", parentType: info.type, parentId: info.id, mode: "edit", existing: dp }),
+            }),
+            can(state.perms, "config:write")
+              ? el("button", {
+                  class: "btn small",
+                  type: "button",
+                  text: "Duplicate",
+                  onclick: () => openChildModal({ childType: "datapoint", parentType: info.type, parentId: info.id, mode: "duplicate", existing: dp }),
+                })
+              : null,
+            can(state.perms, "config:write")
+              ? el("button", {
+                  class: "btn small danger",
+                  type: "button",
+                  text: "Delete",
+                  onclick: () => deleteDatapoint(dp),
+                })
+              : null,
+          ]);
+
+          tbody.appendChild(
+            el("tr", {}, [
+              el("td", { text: String(dp.id) }),
+              el("td", { text: String(dp.label || "") }),
+              el("td", { text: String(dp.category || "") }),
+              el("td", { text: String(dp.type || "") }),
+              el("td", { text: String(dp.address || "") }),
+              el("td", { class: "actions-col" }, [actions]),
+            ])
+          );
+        }
+      }
+      table.appendChild(tbody);
+
+      const wrap = el("div", { class: "table-wrap" }, [table]);
+      section.appendChild(wrap);
+      return section;
+    }
+
+    async function createPlc() {
+      const form = $("form-plc");
+      if (!form) return;
+
+      setStatus("modal-plc-status", "Creating…");
+      const fd = new FormData(form);
+      const name = String(fd.get("name") || "").trim();
+      const ip = String(fd.get("ip") || "").trim();
+      const port = clampInt(fd.get("port"), 502);
+
+      try {
+        await api.post("/api/config/plcs", { json: { name, ip, port } });
+        toast("PLC created");
+        closeDialog("modal-plc");
+        form.reset();
+        await loadTree(true);
+      } catch (err) {
+        setStatus("modal-plc-status", err?.message || "Failed to create PLC", "error");
+      }
+    }
+
+    async function openChildModal({ childType, parentType, parentId, mode = "create", existing = null }) {
+      const dlg = $("modal-add-child");
+      const form = $("form-add-child");
+      const fields = $("child-fields");
+      const title = $("child-title");
+      if (!dlg || !form || !fields || !title) return;
+
+      setStatus("modal-child-status", "");
+      form.reset();
+      fields.innerHTML = "";
+
+      const isEditMode = mode === "edit";
+      form.querySelector('input[name="id"]').value = isEditMode && existing ? String(existing.id || "") : "";
+      form.querySelector('input[name="parent_type"]').value = parentType;
+      form.querySelector('input[name="parent_id"]').value = String(parentId);
+      form.querySelector('input[name="child_type"]').value = childType;
+
+      if (childType === "container") {
+        title.textContent = "Add Container";
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Name" }), el("input", { name: "name", required: "true" })]));
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), el("input", { name: "type", placeholder: "optional" })]));
+
+        // Allow assigning a datapoint group when creating a container
+        try {
+          await ensureMetaLoaded(false);
+        } catch (err) {
+          // keep modal usable even if meta load fails
+        }
+        const containerGroupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat((state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name })))
+        );
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Group" }), containerGroupSel]));
+      } else if (childType === "equipment") {
+        title.textContent = "Add Equipment";
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Name" }), el("input", { name: "name", required: "true" })]));
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), el("input", { name: "type", placeholder: "optional" })]));
+
+        // Allow assigning a datapoint group when creating equipment
+        try {
+          await ensureMetaLoaded(false);
+        } catch (err) {
+          // ignore
+        }
+        const equipmentGroupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat((state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name })))
+        );
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Group" }), equipmentGroupSel]));
+      } else if (childType === "datapoint") {
+        title.textContent = mode === "edit" ? `Edit DataPoint #${existing?.id}` : mode === "duplicate" ? `Duplicate DataPoint #${existing?.id}` : "Add DataPoint";
+
+        // Load dropdown options (classes/units/groups) used by datapoint editor.
+        try {
+          await ensureMetaLoaded(false);
+        } catch (err) {
+          // Keep modal functional even if meta options fail to load.
+          toast(err?.message || "Failed to load datapoint meta lists", "error");
+          state.meta.loaded = false;
+          state.meta.classes = [];
+          state.meta.units = [];
+          state.meta.groups = [];
+        }
+
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Label" }), el("input", { name: "label", required: "true", value: existing?.label || "" })]));
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Description" }), el("input", { name: "description", value: existing?.description || "" })]));
+
+        const category = el("select", { name: "category" }, [
+          el("option", { value: "read", text: "read" }),
+          el("option", { value: "write", text: "write" }),
+        ]);
+        category.value = existing?.category || "read";
+
+        const typeSel = el("select", { name: "type" }, [
+          el("option", { value: "INTEGER", text: "INTEGER" }),
+          el("option", { value: "DIGITAL", text: "DIGITAL" }),
+          el("option", { value: "REAL", text: "REAL" }),
+        ]);
+        typeSel.value = existing?.type || "INTEGER";
+
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Category" }), category]));
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), typeSel]));
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Address" }), el("input", { name: "address", required: "true", value: existing?.address || "" })]));
+
+        // DB-driven datapoint meta
+        const groupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat(
+            (state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name }))
+          )
+        );
+        groupSel.value = existing?.groupId ? String(existing.groupId) : "";
+
+        // also allow setting group on container/equipment editors below
+
+        const classSel = el(
+          "select",
+          { name: "classId" },
+          [el("option", { value: "", text: "(none)" })].concat(
+            (state.meta.classes || []).map((c) => el("option", { value: String(c.id), text: c.name }))
+          )
+        );
+        classSel.value = existing?.classId ? String(existing.classId) : "";
+
+        const unitSel = el(
+          "select",
+          { name: "unitId" },
+          [el("option", { value: "", text: "(none)" })].concat(
+            (state.meta.units || []).map((u) => el("option", { value: String(u.id), text: u.name }))
+          )
+        );
+        unitSel.value = existing?.unitId ? String(existing.unitId) : "";
+
+        const multiplierInput = el("input", {
+          name: "multiplier",
+          type: "text",
+          inputmode: "decimal",
+          placeholder: "e.g., 0.5, 1, 2.5",
+          value: String(existing?.multiplier ?? 1),
+        });
+
+        const classWrap = el("label", {}, [el("span", { class: "muted", text: "Class" }), classSel]);
+        const unitWrap = el("label", {}, [el("span", { class: "muted", text: "Unit" }), unitSel]);
+
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Group" }), groupSel]));
+        fields.appendChild(classWrap);
+        fields.appendChild(unitWrap);
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Multiplier" }), multiplierInput]));
+
+        // Bit labels editor (only for DIGITAL)
+        const bitsWrap = el("div", { id: "bitlabels-wrap" }, []);
+        const bitsTitle = el("div", { class: "row" }, [
+          el("strong", { text: "Bit Labels" }),
+          el("button", { class: "btn small", type: "button", text: "Add Bit", onclick: () => addBitRow(bitsWrap, null, "") }),
+        ]);
+        bitsWrap.appendChild(bitsTitle);
+
+        const bitsList = el("div", { id: "bitlabels-list", style: "display:grid; gap:8px; margin-top: 8px;" });
+        bitsWrap.appendChild(bitsList);
+
+        const existingBits = existing?.bitLabels || {};
+        const entries = Object.entries(existingBits).sort((a, b) => clampInt(a[0], 0) - clampInt(b[0], 0));
+        if (entries.length) {
+          for (const [bit, lbl] of entries) addBitRow(bitsWrap, bit, lbl);
+        } else {
+          // start empty
+          addBitRow(bitsWrap, "0", "");
+        }
+
+        const hint = el("div", { class: "hint muted" }, [
+          "Bit labels are only used for DIGITAL datapoints. They are stored as a map {bit: label}.",
+        ]);
+        bitsWrap.appendChild(hint);
+
+        const toggleByType = () => {
+          const isDigital = typeSel.value === "DIGITAL";
+          bitsWrap.classList.toggle("hidden", !isDigital);
+
+          // class/unit are only allowed for REAL/INTEGER.
+          classWrap.classList.toggle("hidden", isDigital);
+          unitWrap.classList.toggle("hidden", isDigital);
+          classSel.toggleAttribute("disabled", isDigital);
+          unitSel.toggleAttribute("disabled", isDigital);
+
+          if (isDigital) {
+            classSel.value = "";
+            unitSel.value = "";
+          }
+        };
+        typeSel.addEventListener("change", toggleByType);
+        toggleByType();
+
+        fields.appendChild(bitsWrap);
+
+        if (mode === "edit") {
+          // owner cannot be changed here
+        }
+      }
+
+      openDialog(dlg);
+    }
+
+    function addBitRow(bitsWrap, bit, label) {
+      const list = bitsWrap.querySelector("#bitlabels-list");
+      if (!list) return;
+
+      const row = el("div", { class: "row", style: "justify-content: flex-start" }, [
+        el("input", { name: "bit", style: "width: 90px", placeholder: "bit", value: bit ?? "" }),
+        el("input", { name: "bit_label", style: "flex: 1", placeholder: "label", value: label ?? "" }),
+        el("button", { class: "btn small danger", type: "button", text: "Remove", onclick: () => row.remove() }),
+      ]);
+
+      list.appendChild(row);
+    }
+
+    function collectBitLabels(form) {
+      const wrap = form.querySelector("#bitlabels-wrap");
+      if (!wrap || wrap.classList.contains("hidden")) return null;
+
+      const rows = wrap.querySelectorAll("#bitlabels-list .row");
+      const out = {};
+      for (const r of rows) {
+        const bit = clampInt(r.querySelector('input[name="bit"]')?.value, NaN);
+        const label = String(r.querySelector('input[name="bit_label"]')?.value || "").trim();
+        if (!Number.isFinite(bit)) continue;
+        if (!label) continue;
+        out[String(bit)] = label;
+      }
+      return out;
+    }
+
+    async function submitChildForm() {
+      const form = $("form-add-child");
+      if (!form) return;
+
+      setStatus("modal-child-status", "Saving…");
+      const fd = new FormData(form);
+      const id = String(fd.get("id") || "").trim();
+      const parentType = String(fd.get("parent_type") || "");
+      const parentId = clampInt(fd.get("parent_id"), 0);
+      const childType = String(fd.get("child_type") || "");
+
+      try {
+        if (childType === "container") {
+          const name = String(fd.get("name") || "").trim();
+          const type = String(fd.get("type") || "").trim() || null;
+          const groupIdRaw = String(fd.get("groupId") || "").trim();
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          await api.post(`/api/config/plcs/${parentId}/containers`, { json: { name, type, groupId } });
+          toast("Container added");
+        } else if (childType === "equipment") {
+          const name = String(fd.get("name") || "").trim();
+          const type = String(fd.get("type") || "").trim() || null;
+          const groupIdRaw = String(fd.get("groupId") || "").trim();
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          await api.post(`/api/config/containers/${parentId}/equipment`, { json: { name, type, groupId } });
+          toast("Equipment added");
+        } else if (childType === "datapoint") {
+          const label = String(fd.get("label") || "").trim();
+          const description = String(fd.get("description") || "").trim() || null;
+          const category = String(fd.get("category") || "read");
+          const type = String(fd.get("type") || "INTEGER");
+          const address = String(fd.get("address") || "").trim();
+
+          const groupIdRaw = String(fd.get("groupId") || "").trim();
+          const classIdRaw = String(fd.get("classId") || "").trim();
+          const unitIdRaw = String(fd.get("unitId") || "").trim();
+
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          const classId = classIdRaw ? clampInt(classIdRaw, 0) : null;
+          const unitId = unitIdRaw ? clampInt(unitIdRaw, 0) : null;
+
+          // Multiplier supports decimal values for scaling (e.g., 0.5, 1.5, 2.0, etc.)
+          const multiplier = clampFloat(fd.get("multiplier"), 1.0);
+
+          const bitLabels = collectBitLabels(form);
+
+          const payload = {
+            label,
+            description,
+            category,
+            type,
+            address,
+            groupId,
+            classId: type === "DIGITAL" ? null : classId,
+            unitId: type === "DIGITAL" ? null : unitId,
+            multiplier,
+            bitLabels,
+          };
+
+          if (!id) {
+            const path =
+              parentType === "plc"
+                ? `/api/config/plcs/${parentId}/data-points`
+                : parentType === "container"
+                ? `/api/config/containers/${parentId}/data-points`
+                : `/api/config/equipment/${parentId}/data-points`;
+
+            await api.post(path, { json: payload });
+            toast("Datapoint added");
+          } else {
+            const dpId = clampInt(id, 0);
+            await api.patch(`/api/config/data-points/${dpId}`, {
+              json: payload,
+            });
+            toast("Datapoint updated");
+          }
+        }
+
+        closeDialog("modal-add-child");
+        await loadTree(true);
+        renderDetails();
+      } catch (err) {
+        setStatus("modal-child-status", err?.message || "Failed to save", "error");
+      }
+    }
+
+    async function deleteDatapoint(dp) {
+      if (!confirmDanger(`Delete datapoint "${dp.label}" (#${dp.id})?`)) return;
+      try {
+        await api.delete(`/api/config/data-points/${dp.id}`);
+        toast("Datapoint deleted");
+        await loadTree(true);
+        renderDetails();
+      } catch (err) {
+        toast(err?.message || "Failed to delete datapoint", "error");
+      }
+    }
+
+    async function saveSelectedNode() {
+      if (!state.cfgSelectedKey) return;
+      if (!can(state.perms, "config:write")) return toast("No config write permission", "error");
+
+      const info = state.cfgIndex.get(state.cfgSelectedKey);
+      if (!info) return;
+
+      // Find inputs inside node-editor
+      const editor = $("node-editor");
+      if (!editor) return;
+
+      const getInput = (name) => editor.querySelector(`input[name="${name}"], select[name="${name}"]`);
+
+      try {
+        if (info.type === "plc") {
+          const name = String(getInput("name")?.value || "").trim();
+          const ip = String(getInput("ip")?.value || "").trim();
+          const port = clampInt(getInput("port")?.value, 502);
+          await api.patch(`/api/config/plcs/${info.id}`, { json: { name, ip, port } });
+          toast("PLC updated");
+        } else if (info.type === "container") {
+          const name = String(getInput("name")?.value || "").trim();
+          const type = String(getInput("type")?.value || "").trim() || null;
+          const groupIdRaw = String(getInput("groupId")?.value || "").trim();
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          await api.patch(`/api/config/containers/${info.id}`, { json: { name, type, groupId } });
+          toast("Container updated");
+        } else if (info.type === "equipment") {
+          const name = String(getInput("name")?.value || "").trim();
+          const type = String(getInput("type")?.value || "").trim() || null;
+          const groupIdRaw = String(getInput("groupId")?.value || "").trim();
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          await api.patch(`/api/config/equipment/${info.id}`, { json: { name, type, groupId } });
+          toast("Equipment updated");
+        }
+        await loadTree(true);
+        renderDetails();
+      } catch (err) {
+        setStatus("node-status", err?.message || "Failed to save node", "error");
+      }
+    }
+
+    async function deleteSelectedNode() {
+      if (!state.cfgSelectedKey) return;
+      if (!can(state.perms, "config:write")) return toast("No config write permission", "error");
+
+      const info = state.cfgIndex.get(state.cfgSelectedKey);
+      if (!info) return;
+
+      if (!confirmDanger(`Delete ${info.type} "${info.name}" (#${info.id})?`)) return;
+
+      const endpoint =
+        info.type === "plc"
+          ? `/api/config/plcs/${info.id}`
+          : info.type === "container"
+          ? `/api/config/containers/${info.id}`
+          : `/api/config/equipment/${info.id}`;
+
+      try {
+        await api.delete(endpoint, { query: { force: false } });
+        toast("Deleted");
+        state.cfgSelectedKey = null;
+        await loadTree(true);
+      } catch (err) {
+        const msg = err?.message || "";
+        if (msg.includes("dependent") || msg.includes("force=true")) {
+          if (confirmDanger("This node has dependent resources. Force delete (also deletes its children/datapoints)?")) {
+            try {
+              await api.delete(endpoint, { query: { force: true } });
+              toast("Deleted (force)");
+              state.cfgSelectedKey = null;
+              await loadTree(true);
+            } catch (err2) {
+              toast(err2?.message || "Failed to force delete", "error");
+            }
+          }
+        } else {
+          toast(err?.message || "Failed to delete", "error");
+        }
+      }
+      renderDetails();
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Datapoint meta view
+  // -----------------------------
+  const metaView = (() => {
+    let initialized = false;
+
+    function bind() {
+      $("btn-meta-refresh")?.addEventListener("click", () => refresh(true));
+
+      $("btn-dpclass-refresh")?.addEventListener("click", () => refreshKind("class"));
+      $("btn-dpunit-refresh")?.addEventListener("click", () => refreshKind("unit"));
+      $("btn-dpgroup-refresh")?.addEventListener("click", () => refreshKind("group"));
+
+      $("btn-dpclass-new")?.addEventListener("click", () => openMetaModal("class", null));
+      $("btn-dpunit-new")?.addEventListener("click", () => openMetaModal("unit", null));
+      $("btn-dpgroup-new")?.addEventListener("click", () => openMetaModal("group", null));
+
+      const form = $("form-meta-option");
+      form?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitMetaForm();
+      });
+
+      // Delegate edit/delete actions
+      $("dpclass-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "class"));
+      $("dpunit-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "unit"));
+      $("dpgroup-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "group"));
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      await refresh(false);
+    }
+
+    async function refresh(force) {
+      try {
+        await ensureMetaLoaded(force);
+        render();
+        setStatus("dpclass-status", "");
+        setStatus("dpunit-status", "");
+        setStatus("dpgroup-status", "");
+      } catch (err) {
+        toast(err?.message || "Failed to load meta lists", "error");
+      }
+    }
+
+    async function refreshKind(kind) {
+      // We currently load all 3 lists together to keep the UI consistent.
+      await refresh(true);
+    }
+
+    function render() {
+      renderMetaTable("dpclass-table", state.meta.classes, "class");
+      renderMetaTable("dpunit-table", state.meta.units, "unit");
+      renderMetaTable("dpgroup-table", state.meta.groups, "group");
+    }
+
+    function renderMetaTable(tableId, items, kind) {
+      const table = $(tableId);
+      const tbody = table?.querySelector("tbody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      for (const item of items || []) {
+        const tr = el("tr", {}, [
+          el("td", { text: String(item.id ?? "") }),
+          el("td", { text: item.name ?? "" }),
+          el("td", { text: item.description ?? "" }),
+          el("td", {}, [
+            el(
+              "button",
+              {
+                class: "btn",
+                dataset: { action: "edit", kind, id: String(item.id) },
+                type: "button",
+                text: "Edit",
+              },
+              []
+            ),
+            " ",
+            el(
+              "button",
+              {
+                class: "btn danger",
+                dataset: { action: "delete", kind, id: String(item.id) },
+                type: "button",
+                text: "Delete",
+              },
+              []
+            ),
+          ]),
+        ]);
+        tbody.appendChild(tr);
+      }
+
+      if (!items || items.length === 0) {
+        tbody.appendChild(
+          el("tr", {}, [
+            el(
+              "td",
+              { class: "muted", colspan: "4", text: "No items" },
+              []
+            ),
+          ])
+        );
+      }
+    }
+
+    function onMetaTableClick(ev, kind) {
+      const btn = ev.target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = clampInt(btn.dataset.id, 0);
+      if (!id) return;
+
+      const list = kind === "class" ? state.meta.classes : kind === "unit" ? state.meta.units : state.meta.groups;
+      const existing = (list || []).find((x) => Number(x.id) === id) || null;
+      if (action === "edit") return openMetaModal(kind, existing);
+      if (action === "delete") return deleteMeta(kind, existing);
+    }
+
+    function openMetaModal(kind, existing) {
+      const dlg = $("modal-meta-option");
+      const form = $("form-meta-option");
+      if (!dlg || !form) return;
+      setStatus("modal-meta-status", "");
+
+      form.reset();
+      form.elements.kind.value = kind;
+      form.elements.id.value = existing?.id ? String(existing.id) : "";
+      form.elements.name.value = existing?.name || "";
+      form.elements.description.value = existing?.description || "";
+
+      const title = $("modal-meta-title");
+      const label = META_KIND[kind]?.label || "Option";
+      if (title) title.textContent = existing ? `Edit ${label}` : `New ${label}`;
+
+      openDialog(dlg);
+    }
+
+    async function submitMetaForm() {
+      const form = $("form-meta-option");
+      if (!form) return;
+      const status = $("modal-meta-status");
+      setStatus(status, "Saving…");
+
+      const fd = new FormData(form);
+      const kind = String(fd.get("kind") || "").trim();
+      const id = clampInt(fd.get("id"), 0);
+      const name = String(fd.get("name") || "").trim();
+      const description = String(fd.get("description") || "").trim();
+
+      const endpoint = META_KIND[kind]?.endpoint;
+      if (!endpoint) {
+        setStatus(status, "Unknown meta option type", "error");
+        return;
+      }
+
+      try {
+        if (id) {
+          await api.patch(`${endpoint}/${id}`, { json: { name, description } });
+        } else {
+          await api.post(endpoint, { json: { name, description } });
+        }
+        closeDialog("modal-meta-option");
+        toast("Saved");
+        await refresh(true);
+      } catch (err) {
+        setStatus(status, err?.message || "Failed to save", "error");
+      }
+    }
+
+    async function deleteMeta(kind, existing) {
+      if (!existing?.id) return;
+      const label = META_KIND[kind]?.label || "Item";
+      if (!confirmDanger(`Delete ${label} '${existing.name}'?`)) return;
+
+      const endpoint = META_KIND[kind]?.endpoint;
+      if (!endpoint) return;
+      try {
+        await api.delete(`${endpoint}/${existing.id}`);
+        toast("Deleted");
+        await refresh(true);
+      } catch (err) {
+        toast(err?.message || "Failed to delete", "error");
+      }
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Alarm Rules view (admin)
+  // -----------------------------
+  const alarmsView = (() => {
+    let initialized = false;
+    let editingRuleId = null;
+
+    const els = {
+      refresh: () => $("btn-alarms-refresh"),
+      new: () => $("btn-alarm-rule-new"),
+      dpSelect: () => $("alarms-datapoint-select"),
+      dpInfo: () => $("alarms-datapoint-info"),
+      search: () => $("alarms-search"),
+      status: () => $("alarms-status"),
+      tableBody: () => qs("#alarms-table tbody"),
+
+      modal: () => $("modal-alarm-rule"),
+      form: () => $("form-alarm-rule"),
+      modalTitle: () => $("alarm-rule-modal-title"),
+      modalStatus: () => $("alarm-rule-status"),
+      cancel: () => $("btn-alarm-rule-cancel"),
+
+      mDatapoint: () => $("alarm-rule-datapoint"),
+      mName: () => $("alarm-rule-name"),
+      mEnabled: () => $("alarm-rule-enabled"),
+      mWarnEnabled: () => $("alarm-rule-warning-enabled"),
+      mScheduleEnabled: () => $("alarm-rule-schedule-enabled"),
+      mSeverity: () => $("alarm-rule-severity"),
+      mComparison: () => $("alarm-rule-comparison"),
+
+      oneBox: () => $("alarm-rule-thresholds-one"),
+      wThreshold: () => $("alarm-rule-warning-threshold"),
+      aThreshold: () => $("alarm-rule-alarm-threshold"),
+
+      rangeBox: () => $("alarm-rule-thresholds-range"),
+      wLow: () => $("alarm-rule-warning-low"),
+      wHigh: () => $("alarm-rule-warning-high"),
+      aLow: () => $("alarm-rule-alarm-low"),
+      aHigh: () => $("alarm-rule-alarm-high"),
+
+      scheduleBox: () => $("alarm-rule-schedule"),
+      start: () => $("alarm-rule-start"),
+      end: () => $("alarm-rule-end"),
+      tz: () => $("alarm-rule-tz"),
+    };
+
+    function parseNullableFloat(value) {
+      const raw = String(value ?? "").trim();
+      if (!raw) return null;
+      const n = Number.parseFloat(raw);
+      if (!Number.isFinite(n)) throw new Error("Invalid number");
+      return n;
+    }
+
+    function currentDp() {
+      const id = Number(state.alarms.selectedDatapointId);
+      if (!Number.isFinite(id) || !id) return null;
+
+      return (
+        state.alarms.datapoints.find((d) => {
+          const did = Number(d.id ?? d.datapoint_id ?? d.data_point_id);
+          return Number.isFinite(did) && did === id;
+        }) || null
+      );
+    }
+
+
+    function formatThreshold(rule, which) {
+      const cmp = rule.comparison;
+      if (cmp === "above" || cmp === "below") {
+        const v = which === "warning" ? rule.warning_threshold : rule.alarm_threshold;
+        return (v === null || typeof v === "undefined") ? "—" : String(v);
+      }
+      // range
+      const lo = which === "warning" ? rule.warning_threshold_low : rule.alarm_threshold_low;
+      const hi = which === "warning" ? rule.warning_threshold_high : rule.alarm_threshold_high;
+      if (lo === null || hi === null || typeof lo === "undefined" || typeof hi === "undefined") return "—";
+      return `${lo} … ${hi}`;
+    }
+
+    function formatSchedule(rule) {
+      if (!rule.schedule_enabled) return "Always";
+      const s = rule.schedule_start_time || "";
+      const e = rule.schedule_end_time || "";
+      const tz = rule.schedule_timezone || "UTC";
+      if (!s || !e) return `Scheduled (${tz})`;
+      if (String(s) === String(e)) return `24h (${tz})`;
+      return `${s} – ${e} (${tz})`;
+    }
+
+    function updateThresholdUI() {
+      const cmp = els.mComparison()?.value || "above";
+      const isRange = cmp === "outside_range" || cmp === "inside_range";
+      els.oneBox()?.classList.toggle("hidden", isRange);
+      els.rangeBox()?.classList.toggle("hidden", !isRange);
+      const wOn = !!els.mWarnEnabled()?.checked;
+      // Enable/disable warning inputs
+      [els.wThreshold(), els.wLow(), els.wHigh()].forEach((n) => {
+        if (!n) return;
+        n.disabled = !wOn;
+      });
+    }
+
+    function updateScheduleUI() {
+      const on = !!els.mScheduleEnabled()?.checked;
+      els.scheduleBox()?.classList.toggle("hidden", !on);
+      [els.start(), els.end(), els.tz()].forEach((n) => {
+        if (!n) return;
+        n.disabled = !on;
+      });
+    }
+
+    async function renderDatapoints() {
+      const sel = els.dpSelect();
+      if (!sel) return;
+
+      const groupSel = $("alarms-group-select");
+      const prevGroupValue = groupSel ? String(groupSel.value || "") : "";
+
+      // Build group options (if the group filter exists in HTML)
+      if (groupSel) {
+        groupSel.innerHTML = "";
+        groupSel.appendChild(el("option", { value: "", text: "All groups" }));
+        groupSel.appendChild(el("option", { value: "__none__", text: "Ungrouped" }));
+
+        // Try to load meta groups (best labels). If this fails (no config:read),
+        // we still render a minimal group list based on datapoints we can see.
+        try {
+          if (!state.meta.loaded) await ensureMetaLoaded(false);
+        } catch {
+          // ignore
+        }
+
+        const metaGroups = Array.isArray(state.meta.groups) ? state.meta.groups : [];
+
+        const dpGroupIds = Array.from(
+          new Set(
+            (state.alarms.datapoints || [])
+              .map((d) => d.groupId ?? d.group_id ?? d.group ?? null)
+              .filter((x) => x !== null && typeof x !== "undefined")
+          )
+        ).sort((a, b) => Number(a) - Number(b));
+
+        const byId = new Map(metaGroups.map((g) => [String(g.id), g]));
+        const merged = metaGroups.slice();
+
+        for (const gid of dpGroupIds) {
+          const k = String(gid);
+          if (!byId.has(k)) merged.push({ id: gid, name: `Group #${gid}`, description: null });
+        }
+
+        merged.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+        for (const g of merged) {
+          groupSel.appendChild(el("option", { value: String(g.id), text: g.name }));
+        }
+
+        // Restore previous selection if possible
+        if (prevGroupValue && Array.from(groupSel.options).some((o) => o.value === prevGroupValue)) {
+          groupSel.value = prevGroupValue;
+        } else {
+          groupSel.value = "";
+        }
+      }
+
+      const selectedGroupRaw = groupSel ? String(groupSel.value || "") : "";
+      const groupFilter =
+        selectedGroupRaw === "__none__" ? "__none__" : selectedGroupRaw ? clampInt(selectedGroupRaw, 0) : null;
+
+      // Filter datapoints by selected group
+      const dps = (state.alarms.datapoints || [])
+        .filter((dp) => {
+          const gid = dp.groupId ?? dp.group_id ?? dp.group ?? null;
+          if (groupFilter === null) return true;
+          if (groupFilter === "__none__") return gid === null || typeof gid === "undefined";
+          return Number(gid) === Number(groupFilter);
+        })
+        .sort((a, b) => {
+          // stable, human-friendly sorting
+          const la = String(a._display || a.label || a.name || "");
+          const lb = String(b._display || b.label || b.name || "");
+          const c = la.localeCompare(lb);
+          if (c !== 0) return c;
+          return Number(a.id) - Number(b.id);
+        });
+
+      // Populate datapoint select
+      const prevDpId = state.alarms.selectedDatapointId;
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: dps.length ? "Select datapoint…" : "No datapoints found" }));
+
+      for (const dp of dps) {
+        const id = dp.id ?? dp.datapoint_id ?? dp.data_point_id ?? "";
+        const label = dp.description || dp._display || dp.label || dp.name || "";
+        sel.appendChild(el("option", { value: String(id), text: label ? String(label) : String(id) }));
+      }
+
+      let chosen = null;
+      if (prevDpId && dps.some((d) => Number(d.id) === Number(prevDpId))) chosen = prevDpId;
+      else if (dps.length) chosen = dps[0].id;
+
+      if (chosen) {
+        sel.value = String(chosen);
+        state.alarms.selectedDatapointId = clampInt(chosen, 0);
+      } else {
+        sel.value = "";
+        state.alarms.selectedDatapointId = null;
+      }
+
+      const info = els.dpInfo();
+      const dp = currentDp();
+      if (info) {
+        if (!dp) {
+          info.textContent = "Pick a datapoint to view and manage its alarm rules.";
+        } else {
+          const gid = dp.groupId ?? dp.group_id ?? null;
+          const gname = gid
+            ? (state.meta.groups || []).find((g) => String(g.id) === String(gid))?.name || `Group #${gid}`
+            : "Ungrouped";
+          info.textContent =
+            `${dp.owner_type || dp.ownerType || ""}/${dp.owner_id || dp.ownerId || ""}` +
+            ` · ${dp.category || ""} · ${dp.type || ""} · ${dp.address || ""}` +
+            ` · ${gname}`;
+        }
+      }
+
+      // Optional datapoints table for quicker actions
+      const tableWrap = $("alarms-datapoints-table");
+      if (tableWrap) {
+        tableWrap.innerHTML = "";
+        const table = el("table", { class: "table" }, []);
+        table.appendChild(
+          el("thead", {}, [
+            el("tr", {}, [
+              el("th", { text: "ID" }),
+              el("th", { text: "Label" }),
+              el("th", { text: "Group" }),
+              el("th", { text: "Type" }),
+              el("th", { text: "Address" }),
+              el("th", { text: "" }),
+            ]),
+          ])
+        );
+        const tbody = el("tbody");
+        for (const d of dps) {
+          const gid = d.groupId ?? d.group_id ?? null;
+          const groupName =
+            gid != null
+              ? (state.meta.groups || []).find((g) => String(g.id) === String(gid))?.name || `Group #${gid}`
+              : "—";
+          const actions = el("div", { class: "actions-group" }, [
+            el("button", { class: "btn small", type: "button", dataset: { action: "add-alarm", dpId: d.id }, text: "Add Alarm" }),
+          ]);
+          tbody.appendChild(
+            el("tr", {}, [
+              el("td", { text: String(d.id) }),
+              el("td", { text: String(d.label || "") }),
+              el("td", { text: groupName }),
+              el("td", { text: String(d.type || "") }),
+              el("td", { text: String(d.address || "") }),
+              el("td", { class: "actions-col" }, [actions]),
+            ])
+          );
+        }
+        if (!dps.length) {
+          tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No datapoints found." })]));
+        }
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+      }
+    }
+
+    function renderRules() {
+      const body = els.tableBody();
+      if (!body) return;
+      body.innerHTML = "";
+
+      const dp = currentDp();
+      if (!dp) {
+        if (!state.alarms.datapoints || state.alarms.datapoints.length === 0) {
+          setStatus(els.status(), "No datapoints available. Ensure you have config:read and datapoints exist.", "error");
+        } else {
+          setStatus(els.status(), "Select a datapoint to load rules.", "");
+        }
+        return;
+      }
+
+      const q = String(els.search()?.value || "").toLowerCase().trim();
+      const canWrite = (can(state.perms, "alarms:write") || can(state.perms, "alarms:admin"));
+      const dpId = Number(dp.id ?? dp.datapoint_id ?? dp.data_point_id);
+      const rows = (state.alarms.rules || []).filter((r) => {
+        const ruleDpId = Number(r.datapoint_id ?? r.datapointId ?? r.data_point_id);
+
+        // Only filter if both are valid numbers
+        if (Number.isFinite(dpId) && Number.isFinite(ruleDpId) && dpId !== ruleDpId) return false;
+
+        if (!q) return true;
+        return (
+          String(r.name || "").toLowerCase().includes(q) ||
+          String(r.severity || "").toLowerCase().includes(q) ||
+          String(r.comparison || "").toLowerCase().includes(q)
+        );
+      });
+
+      if (!rows.length) {
+        body.appendChild(el("tr", {}, [el("td", { colspan: "8", class: "muted", text: "No alarm rules." })]));
+        setStatus(els.status(), "Loaded 0 rule(s).", "ok");
+        return;
+      }
+
+      for (const r of rows) {
+        const warn = r.warning_enabled ? formatThreshold(r, "warning") : "—";
+        const al = formatThreshold(r, "alarm");
+        const tr = el("tr", {}, [
+          el("td", { text: r.name || "" }),
+          el("td", { text: r.severity || "" }),
+          el("td", { text: r.comparison || "" }),
+          el("td", { text: warn }),
+          el("td", { text: al }),
+          el("td", { text: formatSchedule(r) }),
+          el("td", { text: r.enabled ? "Yes" : "No" }),
+          el("td", {}, [
+            canWrite
+              ? el("div", { class: "actions" }, [
+                  el("button", { class: "btn", dataset: { action: "edit", id: r.id }, text: "Edit" }),
+                  el("button", { class: "btn danger", dataset: { action: "delete", id: r.id }, text: "Delete" }),
+                ])
+              : el("span", { class: "muted", text: "—" }),
+          ]),
+        ]);
+        body.appendChild(tr);
+      }
+
+      setStatus(els.status(), `Loaded ${rows.length} rule(s).`, "ok");
+    }
+
+    function flattenDatapointsFromTree(tree) {
+      const out = [];
+      const seen = new Set();
+
+      const push = (dp, pathParts) => {
+        if (!dp) return;
+        const id = dp.id ?? dp.datapoint_id ?? dp.data_point_id ?? null;
+        if (!id) return;
+        if (seen.has(Number(id))) return;
+        seen.add(Number(id));
+
+        const path = (pathParts || []).filter(Boolean).join(" / ");
+        const label = dp.label || dp.name || "";
+        const display = path ? `${path} · ${label} (id:${id})` : `${label} (id:${id})`;
+
+        out.push({
+          ...dp,
+          id: Number(id),
+          _path: path,
+          _display: display,
+        });
+      };
+
+      const walkEquipment = (e, plcName, containerName) => {
+        const eName = e?.name || `Equipment ${e?.id ?? ""}`.trim();
+        for (const dp of e?.datapoints || []) push(dp, [plcName, containerName, eName]);
+      };
+
+      const walkContainer = (c, plcName) => {
+        const cName = c?.name || `Container ${c?.id ?? ""}`.trim();
+        for (const dp of c?.datapoints || []) push(dp, [plcName, cName]);
+        for (const e of c?.equipment || []) walkEquipment(e, plcName, cName);
+      };
+
+      const walkPlc = (p) => {
+        const plcName = p?.name || `PLC ${p?.id ?? ""}`.trim();
+        for (const dp of p?.datapoints || []) push(dp, [plcName]);
+        for (const c of p?.containers || []) walkContainer(c, plcName);
+      };
+
+      for (const plc of tree || []) walkPlc(plc);
+
+      // sort for a stable UI
+      out.sort((a, b) => {
+        const la = String(a._display || a.label || "");
+        const lb = String(b._display || b.label || "");
+        const c = la.localeCompare(lb);
+        if (c !== 0) return c;
+        return Number(a.id) - Number(b.id);
+      });
+
+      return out;
+    }
+
+    async function loadDatapoints(force = false) {
+      if (state.alarms.loaded && !force) return;
+      setStatus(els.status(), "Loading datapoints…");
+
+      let items = null;
+      let lastErr = null;
+
+      // Preferred (if present): purpose-built admin endpoint
+      try {
+        const r = await api.get("/admin/alarm-rules/datapoints");
+        if (Array.isArray(r) && r.length) items = r;
+      } catch (err) {
+        lastErr = err;
+      }
+
+      // Fallback: use the existing config tree endpoint (this repo does NOT have /api/config/data-points list)
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        try {
+          const tree = await api.get("/api/config/tree");
+          items = flattenDatapointsFromTree(tree);
+        } catch (err) {
+          lastErr = err;
+          items = [];
+        }
+      }
+
+      state.alarms.datapoints = Array.isArray(items) ? items : [];
+      state.alarms.loaded = true;
+
+      // Load meta groups for the group filter labels (best-effort)
+      try {
+        if (!state.meta.loaded) await ensureMetaLoaded(false);
+      } catch {
+        // ignore
+      }
+
+      // Preserve selection if possible
+      const cur = state.alarms.selectedDatapointId;
+      if (cur && state.alarms.datapoints.some((d) => Number(d.id) === Number(cur))) {
+        // keep
+      } else if (state.alarms.datapoints.length) {
+        state.alarms.selectedDatapointId = Number(state.alarms.datapoints[0].id);
+      } else {
+        state.alarms.selectedDatapointId = null;
+        if (lastErr) {
+          setStatus(els.status(), lastErr?.message || "Failed to load datapoints", "error");
+        } else {
+          setStatus(els.status(), "No datapoints found.", "error");
+        }
+      }
+    }
+
+    async function loadRules() {
+      const dp = currentDp();
+      if (!dp) {
+        state.alarms.rules = [];
+        renderRules();
+        return;
+      }
+
+      setStatus(els.status(), "Loading rules…");
+
+      const dpId = Number(dp.id ?? dp.datapoint_id ?? dp.data_point_id);
+      const res = await api.get("/admin/alarm-rules", { query: { datapoint_id: dpId } });
+
+      // ✅ Support both shapes: Array OR {items:[...]}
+      const rules = Array.isArray(res) ? res : (Array.isArray(res?.items) ? res.items : []);
+      state.alarms.rules = rules;
+
+      renderRules();
+    }
+
+    function fillModalDatapoints(selectedId) {
+      const sel = els.mDatapoint();
+      if (!sel) return;
+      sel.innerHTML = "";
+      for (const raw of state.alarms.datapoints) {
+        const id = raw.id ?? raw.datapoint_id ?? raw.data_point_id ?? "";
+        const label = raw.description || raw._display || raw.label || raw.name || String(id);
+        sel.appendChild(el("option", { value: String(id), text: String(label) }));
+      }
+      if (selectedId) sel.value = String(selectedId);
+    }
+
+    function openRuleModal(rule) {
+      const canWrite = (can(state.perms, "alarms:write") || can(state.perms, "alarms:admin"));
+      if (!canWrite) {
+        toast("You don't have permission to change alarm rules.", "error");
+        return;
+      }
+      editingRuleId = rule?.id || null;
+      setStatus(els.modalStatus(), "");
+      const title = els.modalTitle();
+      if (title) title.textContent = editingRuleId ? `Edit Alarm Rule #${editingRuleId}` : "New Alarm Rule";
+
+      const dpId = rule?.datapoint_id || state.alarms.selectedDatapointId;
+      fillModalDatapoints(dpId);
+
+      if (els.mName()) els.mName().value = rule?.name || "";
+      if (els.mEnabled()) els.mEnabled().checked = rule ? !!rule.enabled : true;
+      if (els.mSeverity()) els.mSeverity().value = rule?.severity || "info";
+      if (els.mComparison()) els.mComparison().value = rule?.comparison || "above";
+
+      if (els.mWarnEnabled()) els.mWarnEnabled().checked = rule ? !!rule.warning_enabled : false;
+      if (els.wThreshold()) els.wThreshold().value = rule?.warning_threshold ?? "";
+      if (els.aThreshold()) els.aThreshold().value = rule?.alarm_threshold ?? "";
+
+      if (els.wLow()) els.wLow().value = rule?.warning_threshold_low ?? "";
+      if (els.wHigh()) els.wHigh().value = rule?.warning_threshold_high ?? "";
+      if (els.aLow()) els.aLow().value = rule?.alarm_threshold_low ?? "";
+      if (els.aHigh()) els.aHigh().value = rule?.alarm_threshold_high ?? "";
+
+      if (els.mScheduleEnabled()) els.mScheduleEnabled().checked = rule ? !!rule.schedule_enabled : false;
+      if (els.start()) els.start().value = rule?.schedule_start_time ? String(rule.schedule_start_time).slice(0, 5) : "";
+      if (els.end()) els.end().value = rule?.schedule_end_time ? String(rule.schedule_end_time).slice(0, 5) : "";
+      if (els.tz()) els.tz().value = rule?.schedule_timezone || "";
+
+      updateThresholdUI();
+      updateScheduleUI();
+      openDialog(els.modal());
+    }
+
+    function closeRuleModal() {
+      closeDialog(els.modal());
+      editingRuleId = null;
+    }
+
+    async function submitRuleForm(ev) {
+      ev.preventDefault();
+      setStatus(els.modalStatus(), "Saving…");
+
+      try {
+        const dpId = clampInt(els.mDatapoint()?.value, 0);
+        if (!dpId) throw new Error("Datapoint is required");
+
+        const name = String(els.mName()?.value || "").trim();
+        if (!name) throw new Error("Name is required");
+
+        const comparison = String(els.mComparison()?.value || "above");
+        const isRange = comparison === "outside_range" || comparison === "inside_range";
+
+        const payload = {
+          datapoint_id: dpId,
+          name,
+          enabled: !!els.mEnabled()?.checked,
+          severity: String(els.mSeverity()?.value || "info"),
+          comparison,
+          warning_enabled: !!els.mWarnEnabled()?.checked,
+          schedule_enabled: !!els.mScheduleEnabled()?.checked,
+          schedule_start_time: els.start()?.value || null,
+          schedule_end_time: els.end()?.value || null,
+          schedule_timezone: String(els.tz()?.value || "").trim() || null,
+        };
+
+        if (isRange) {
+          payload.alarm_threshold_low = parseNullableFloat(els.aLow()?.value);
+          payload.alarm_threshold_high = parseNullableFloat(els.aHigh()?.value);
+          payload.warning_threshold_low = parseNullableFloat(els.wLow()?.value);
+          payload.warning_threshold_high = parseNullableFloat(els.wHigh()?.value);
+          payload.alarm_threshold = null;
+          payload.warning_threshold = null;
+        } else {
+          payload.alarm_threshold = parseNullableFloat(els.aThreshold()?.value);
+          payload.warning_threshold = parseNullableFloat(els.wThreshold()?.value);
+          payload.alarm_threshold_low = null;
+          payload.alarm_threshold_high = null;
+          payload.warning_threshold_low = null;
+          payload.warning_threshold_high = null;
+        }
+
+        // If schedule disabled, clear schedule fields
+        if (!payload.schedule_enabled) {
+          payload.schedule_start_time = null;
+          payload.schedule_end_time = null;
+          payload.schedule_timezone = null;
+        }
+
+        if (!payload.warning_enabled) {
+          payload.warning_threshold = null;
+          payload.warning_threshold_low = null;
+          payload.warning_threshold_high = null;
+        }
+
+        let res;
+        if (editingRuleId) {
+          res = await api.put(`/admin/alarm-rules/${editingRuleId}`, { json: payload });
+          toast("Rule updated");
+        } else {
+          res = await api.post("/admin/alarm-rules", { json: payload });
+          toast("Rule created");
+        }
+
+        // Ensure selected datapoint matches
+        state.alarms.selectedDatapointId = res?.datapoint_id || payload.datapoint_id;
+        await renderDatapoints();
+        closeRuleModal();
+        await loadRules();
+      } catch (err) {
+        setStatus(els.modalStatus(), err?.message || "Failed to save rule", "error");
+      }
+    }
+
+    async function deleteRule(id) {
+      const canWrite = (can(state.perms, "alarms:write") || can(state.perms, "alarms:admin"));
+      if (!canWrite) return;
+      if (!confirmDanger("Delete this alarm rule?")) return;
+      try {
+        await api.delete(`/admin/alarm-rules/${id}`);
+        toast("Rule deleted");
+        await loadRules();
+      } catch (err) {
+        toast(err?.message || "Failed to delete rule", "error");
+      }
+    }
+
+    function bind() {
+      els.refresh()?.addEventListener("click", async () => {
+        try {
+          state.alarms.loaded = false;
+          await loadDatapoints(true);
+          await renderDatapoints();
+          await loadRules();
+        } catch (err) {
+          toast(err?.message || "Failed to refresh", "error");
+        }
+      });
+
+      els.dpSelect()?.addEventListener("change", async () => {
+        const id = clampInt(els.dpSelect()?.value, 0);
+        state.alarms.selectedDatapointId = id || null;
+        await renderDatapoints();
+        await loadRules();
+      });
+
+      // Group filter (optional element)
+      const groupFilterEl = $("alarms-group-select");
+      if (groupFilterEl) {
+        groupFilterEl.addEventListener("change", async () => {
+          // re-render datapoints according to selected group
+          await renderDatapoints();
+          // reload rules for current selection (may be null)
+          await loadRules();
+        });
+      }
+
+      els.search()?.addEventListener("input", () => renderRules());
+
+      els.new()?.addEventListener("click", () => openRuleModal(null));
+
+      qs("#alarms-table")?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const id = clampInt(btn.dataset.id, 0);
+        if (!id) return;
+        const rule = (state.alarms.rules || []).find((r) => r.id === id);
+        if (action === "edit") openRuleModal(rule);
+        if (action === "delete") await deleteRule(id);
+      });
+
+      // Optional datapoints table action handler (delegated)
+      $("alarms-datapoints-table")?.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        const action = btn.dataset.action;
+        if (action !== "add-alarm") return;
+        const dpId = clampInt(btn.dataset.dpid ?? btn.dataset.dpId ?? btn.dataset.dp, 0);
+        if (!dpId) return;
+        state.alarms.selectedDatapointId = dpId;
+        openRuleModal(null);
+      });
+
+      // Modal
+      els.cancel()?.addEventListener("click", () => closeRuleModal());
+      els.form()?.addEventListener("submit", submitRuleForm);
+      els.mComparison()?.addEventListener("change", updateThresholdUI);
+      els.mWarnEnabled()?.addEventListener("change", updateThresholdUI);
+      els.mScheduleEnabled()?.addEventListener("change", updateScheduleUI);
+    }
+
+    async function show() {
+      const canAdmin = can(state.perms, "alarms:admin");
+      if (!canAdmin) {
+        setStatus(els.status(), "Not authorized", "error");
+        return;
+      }
+
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+
+      // UX: hide write actions if no write permission
+      const canWrite = (can(state.perms, "alarms:write") || can(state.perms, "alarms:admin"));
+      els.new()?.classList.toggle("hidden", !canWrite);
+
+      try {
+        await loadDatapoints(false);
+        await renderDatapoints();
+        await loadRules();
+      } catch (err) {
+        setStatus(els.status(), err?.message || "Failed to load alarm rules", "error");
+      }
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Access control view
+  // -----------------------------
+  const accessView = (() => {
+    let initialized = false;
+
+    function bind() {
+      $("btn-access-refresh")?.addEventListener("click", () => refresh());
+      $("btn-grants-clear")?.addEventListener("click", () => clearAllGrants());
+
+      $("principal-type")?.addEventListener("change", () => {
+        state.access.principalType = $("principal-type").value;
+        state.access.principalId = null;
+        renderPrincipalOptions();
+        refreshGrants();
+      });
+
+      $("principal-id")?.addEventListener("change", () => {
+        state.access.principalId = clampInt($("principal-id").value, 0) || null;
+        refreshGrants();
+      });
+
+      $("principal-search")?.addEventListener("input", () => renderPrincipalOptions());
+      $("access-search")?.addEventListener("input", () => renderAccessTree());
+
+      $("access-tree")?.addEventListener("change", async (ev) => {
+        const toggle = ev.target.closest("input[data-grant-toggle]");
+        if (!toggle) return;
+        const key = toggle.dataset.nodeKey;
+        await onGrantToggleChanged(key);
+      });
+
+      $("access-tree")?.addEventListener("click", (ev) => {
+        const twisty = ev.target.closest("button[data-toggle]");
+        if (twisty) {
+          ev.stopPropagation();
+          const key = twisty.dataset.toggle;
+          if (state.access.collapsed.has(key)) state.access.collapsed.delete(key);
+          else state.access.collapsed.add(key);
+          renderAccessTree();
+          return;
+        }
+
+        const row = ev.target.closest("[data-node-key]");
+        if (row) {
+          state.access.selectedKey = row.dataset.nodeKey;
+          renderAccessTree();
+          renderAccessPreview();
+        }
+      });
+
+      $("grants-list")?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-grant-id]");
+        if (!btn) return;
+        const grantId = clampInt(btn.dataset.grantId, 0);
+        if (!grantId) return;
+        await deleteGrantById(grantId);
+      });
+    }
+
+    async function show(query) {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+
+      // enforce principal options based on permissions
+      const pt = $("principal-type");
+      const canRole = can(state.perms, "roles:admin");
+      const canUser = can(state.perms, "users:admin");
+
+      // If one is missing, hide it
+      if (pt) {
+        pt.querySelector('option[value="role"]')?.toggleAttribute("disabled", !canRole);
+        pt.querySelector('option[value="user"]')?.toggleAttribute("disabled", !canUser);
+
+        if (state.access.principalType === "role" && !canRole) state.access.principalType = canUser ? "user" : "role";
+        if (state.access.principalType === "user" && !canUser) state.access.principalType = canRole ? "role" : "user";
+
+        pt.value = state.access.principalType;
+      }
+
+      await ensurePrincipalsLoaded();
+      await ensureConfigTreeLoaded();
+
+      // Deep link: #access?principal=user&id=7
+      if (query && query.principal && query.id) {
+        const qType = String(query.principal);
+        const qId = clampInt(query.id, 0);
+        if ((qType === "role" && canRole) || (qType === "user" && canUser)) {
+          state.access.principalType = qType;
+          state.access.principalId = qId || null;
+          if ($("principal-type")) $("principal-type").value = qType;
+        }
+      }
+
+      renderPrincipalOptions();
+      // Select principal from state, or default to first option
+      if (!state.access.principalId) {
+        const sel = $("principal-id");
+        const first = sel?.options?.[0]?.value;
+        state.access.principalId = first ? clampInt(first, 0) : null;
+      }
+      if ($("principal-id") && state.access.principalId) $("principal-id").value = String(state.access.principalId);
+
+      await refreshGrants();
+      renderAccessTree();
+      renderGrantsList();
+      renderAccessPreview();
+    }
+
+    async function ensurePrincipalsLoaded() {
+      // roles + users lists for principal selection
+      // For typeahead friendliness, we keep them in state.
+      try {
+        if (can(state.perms, "roles:admin")) {
+          const roles = await api.get("/admin/roles");
+          state.roles = Array.isArray(roles) ? roles : [];
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (can(state.perms, "users:admin")) {
+          const users = await api.get("/admin/users");
+          state.users = Array.isArray(users) ? users : [];
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    async function ensureConfigTreeLoaded() {
+      if (state.cfgTree.length) return;
+      try {
+        const tree = await api.get("/api/config/tree");
+        state.cfgTree = Array.isArray(tree) ? tree : [];
+        plcView && plcView.show; // noop - keep linter quiet
+        // build index for name lookups
+        // reuse plc view indexer logic
+        // (duplicated small part to avoid tight coupling)
+        state.cfgIndex = new Map();
+        const add = (type, raw, parentKey = null) => {
+          const id = clampInt(raw.id, 0);
+          const key = `${type}:${id}`;
+          const name =
+            type === "plc"
+              ? raw.name
+              : type === "container"
+              ? raw.name
+              : type === "equipment"
+              ? raw.name
+              : type === "datapoint"
+              ? raw.label
+              : String(raw.name || raw.label || "");
+          state.cfgIndex.set(key, { key, type, id, name, parentKey, raw });
+          return key;
+        };
+        for (const plc of state.cfgTree) {
+          const plcKey = add("plc", plc, null);
+          for (const dp of plc.datapoints || []) add("datapoint", dp, plcKey);
+          for (const c of plc.containers || []) {
+            const cKey = add("container", c, plcKey);
+            for (const dp of c.datapoints || []) add("datapoint", dp, cKey);
+            for (const e of c.equipment || []) {
+              const eKey = add("equipment", e, cKey);
+              for (const dp of e.datapoints || []) add("datapoint", dp, eKey);
+            }
+          }
+        }
+      } catch (err) {
+        setStatus("access-status", err?.message || "Failed to load configuration tree", "error");
+      }
+    }
+
+    function renderPrincipalOptions() {
+      const sel = $("principal-id");
+      if (!sel) return;
+
+      const type = $("principal-type")?.value || state.access.principalType;
+      state.access.principalType = type;
+
+      const term = String($("principal-search")?.value || "").trim().toLowerCase();
+
+      const options = [];
+      if (type === "role") {
+        for (const r of state.roles || []) {
+          if (term && !String(r.name || "").toLowerCase().includes(term)) continue;
+          options.push({ id: r.id, label: `${r.name} (#${r.id})` });
+        }
+      } else {
+        for (const u of state.users || []) {
+          if (term && !String(u.username || "").toLowerCase().includes(term)) continue;
+          options.push({ id: u.id, label: `${u.username} (#${u.id})` });
+        }
+      }
+
+      sel.innerHTML = "";
+      for (const o of options) {
+        sel.appendChild(el("option", { value: o.id, text: o.label }));
+      }
+
+      // preserve selection if possible
+      if (state.access.principalId) {
+        const exists = options.some((o) => o.id === state.access.principalId);
+        if (exists) sel.value = String(state.access.principalId);
+      }
+    }
+
+    async function refresh() {
+      await ensurePrincipalsLoaded();
+      await ensureConfigTreeLoaded();
+      renderPrincipalOptions();
+      await refreshGrants();
+      renderAccessTree();
+      renderGrantsList();
+      renderAccessPreview();
+    }
+
+    async function refreshGrants() {
+      const pid = state.access.principalId;
+      const ptype = state.access.principalType;
+
+      if (!pid) {
+        setStatus("access-status", "Select a principal.", "");
+        state.access.grants = [];
+        state.access.grantByKey = new Map();
+        renderGrantsList();
+        renderAccessTree();
+        return;
+      }
+
+      setStatus("access-status", "Loading grants…");
+      try {
+        const url = ptype === "role" ? `/admin/access/roles/${pid}/grants` : `/admin/access/users/${pid}/grants`;
+        const grants = await api.get(url);
+        state.access.grants = Array.isArray(grants) ? grants : [];
+        state.access.grantByKey = new Map();
+        for (const g of state.access.grants) {
+          const key = `${g.resource_type}:${g.resource_id}`;
+          state.access.grantByKey.set(key, g);
+        }
+        setStatus("access-status", `Loaded ${state.access.grants.length} grants.`, "ok");
+      } catch (err) {
+        state.access.grants = [];
+        state.access.grantByKey = new Map();
+        setStatus("access-status", err?.message || "Failed to load grants", "error");
+      }
+
+      renderGrantsList();
+      renderAccessTree();
+    }
+
+    async function clearAllGrants() {
+      const pid = state.access.principalId;
+      if (!pid) return;
+
+      const ptype = state.access.principalType;
+      const msg = ptype === "role" ? "Clear ALL grants for this role?" : "Clear ALL grants for this user?";
+      if (!confirmDanger(msg)) return;
+
+      try {
+        const url = ptype === "role" ? `/admin/access/roles/${pid}/grants` : `/admin/access/users/${pid}/grants`;
+        await api.delete(url);
+        toast("Grants cleared");
+        await refreshGrants();
+      } catch (err) {
+        toast(err?.message || "Failed to clear grants", "error");
+      }
+    }
+
+    function accessRank(level) {
+      if (!level) return 0;
+      return level === "write" ? 2 : 1;
+    }
+
+    function maxLevel(a, b) {
+      return accessRank(a) >= accessRank(b) ? a : b;
+    }
+
+    function computeEffective(nodeInfo, inherited) {
+      const explicit = state.access.grantByKey.get(nodeInfo.key) || null;
+      const explicitLevel = explicit?.access_level || null;
+
+      const inheritedLevel = inherited?.level || null;
+
+      let effective = null;
+      let source = null;
+      let sourceKind = null;
+
+      if (explicitLevel && inheritedLevel) {
+        effective = maxLevel(explicitLevel, inheritedLevel);
+        if (accessRank(explicitLevel) >= accessRank(inheritedLevel)) {
+          source = explicit;
+          sourceKind = "explicit";
+        } else {
+          source = inherited?.sourceGrant || null;
+          sourceKind = "inherited";
+        }
+      } else if (explicitLevel) {
+        effective = explicitLevel;
+        source = explicit;
+        sourceKind = "explicit";
+      } else if (inheritedLevel) {
+        effective = inheritedLevel;
+        source = inherited?.sourceGrant || null;
+        sourceKind = "inherited";
+      }
+
+      return { explicit, explicitLevel, effective, source, sourceKind };
+    }
+
+    function renderAccessTree() {
+      const root = $("access-tree");
+      if (!root) return;
+
+      const term = String($("access-search")?.value || "").trim().toLowerCase();
+      root.innerHTML = "";
+
+      const build = (rawNode, nodeKey, inherited) => {
+        const info = state.cfgIndex.get(nodeKey);
+        if (!info) return null;
+
+        const label = String(info.name || "").toLowerCase();
+
+        // Compute effective access for this node
+        const cur = computeEffective(info, inherited);
+
+        // Determine inheritance to pass down
+        let nextInherited = inherited;
+        if (info.type !== "datapoint") {
+          // if explicit includes descendants, it becomes a candidate for inheritance
+          const eg = cur.explicit;
+          if (eg && eg.include_descendants) {
+            const candidate = {
+              level: eg.access_level,
+              sourceGrant: eg,
+              sourceKey: info.key,
+            };
+            if (!nextInherited) nextInherited = candidate;
+            else {
+              // choose higher rank; if equal choose nearer (candidate)
+              if (accessRank(candidate.level) > accessRank(nextInherited.level)) nextInherited = candidate;
+              else if (accessRank(candidate.level) === accessRank(nextInherited.level)) nextInherited = candidate;
+            }
+          }
+        }
+
+        // Children: containers/equipment/datapoints
+        const children = [];
+        if (info.type === "plc") {
+          for (const c of rawNode.containers || []) {
+            const ck = `container:${c.id}`;
+            const child = build(c, ck, nextInherited);
+            if (child) children.push(child);
+          }
+          for (const dp of rawNode.datapoints || []) {
+            const dk = `datapoint:${dp.id}`;
+            const child = build(dp, dk, nextInherited);
+            if (child) children.push(child);
+          }
+        } else if (info.type === "container") {
+          for (const e of rawNode.equipment || []) {
+            const ek = `equipment:${e.id}`;
+            const child = build(e, ek, nextInherited);
+            if (child) children.push(child);
+          }
+          for (const dp of rawNode.datapoints || []) {
+            const dk = `datapoint:${dp.id}`;
+            const child = build(dp, dk, nextInherited);
+            if (child) children.push(child);
+          }
+        } else if (info.type === "equipment") {
+          for (const dp of rawNode.datapoints || []) {
+            const dk = `datapoint:${dp.id}`;
+            const child = build(dp, dk, nextInherited);
+            if (child) children.push(child);
+          }
+        } else if (info.type === "datapoint") {
+          // datapoints are leaves
+        }
+
+        const selfMatch = !term || label.includes(term);
+        const anyChildMatch = children.some((c) => c._matched);
+        const matched = selfMatch || anyChildMatch;
+        if (!matched) return null;
+
+        const hasChildren = children.length > 0;
+
+        const badges = [];
+        badges.push(el("span", { class: "badge", text: info.type }));
+
+        const inheritedLevel = inherited?.level || null;
+
+        if (cur.explicitLevel) {
+          const cls = cur.explicitLevel === "write" ? "write" : "read";
+          badges.push(el("span", { class: `badge ${cls} explicit`, text: `Explicit ${cur.explicitLevel}` }));
+        }
+        if (inheritedLevel) {
+          const cls = inheritedLevel === "write" ? "write" : "read";
+          badges.push(el("span", { class: `badge ${cls} inherited`, text: `Inherited ${inheritedLevel}` }));
+        }
+        if (!cur.explicitLevel && !inheritedLevel) {
+          badges.push(el("span", { class: "badge", text: "No access" }));
+        }
+
+        // controls represent explicit grant state only
+        const readChecked = !!cur.explicitLevel;
+        const writeChecked = cur.explicitLevel === "write";
+        const descChecked = cur.explicit ? !!cur.explicit.include_descendants : true;
+
+        const readToggle = el("label", { class: "switch" }, [
+          el("input", {
+            type: "checkbox",
+            dataset: { grantToggle: "read", nodeKey: info.key },
+            checked: readChecked ? "true" : null,
+          }),
+          el("span", { text: "R" }),
+        ]);
+
+        const writeToggle = el("label", { class: "switch" }, [
+          el("input", {
+            type: "checkbox",
+            dataset: { grantToggle: "write", nodeKey: info.key },
+            checked: writeChecked ? "true" : null,
+          }),
+          el("span", { text: "W" }),
+        ]);
+
+        const descToggle =
+          info.type === "plc" || info.type === "container" || info.type === "equipment"
+            ? el("label", { class: `switch ${readChecked ? "" : "disabled"}` }, [
+                el("input", {
+                  type: "checkbox",
+                  dataset: { grantToggle: "desc", nodeKey: info.key },
+                  checked: descChecked ? "true" : null,
+                  disabled: readChecked ? null : "true",
+                }),
+                el("span", { text: "Desc" }),
+              ])
+            : null;
+
+        const controls = el("div", { class: "meta" }, [readToggle, writeToggle, descToggle].filter(Boolean));
+
+        const left = el("div", { class: "left" }, [
+          hasChildren
+            ? el("button", { class: "twisty", type: "button", dataset: { toggle: info.key }, text: state.access.collapsed.has(info.key) ? "▸" : "▾" })
+            : el("span", { class: "badge", text: " " }),
+          el("span", { class: "title", text: info.name || info.key }),
+          ...badges,
+        ]);
+
+        const row = el("div", { class: "node", dataset: { nodeKey: info.key } }, [left, controls]);
+        if (state.access.selectedKey === info.key) row.classList.add("selected");
+
+        const container = el("div", {}, [row]);
+        if (hasChildren) {
+          const wrap = el("div", { class: "children" }, children.map((c) => c.el));
+          if (state.access.collapsed.has(info.key)) wrap.classList.add("hidden");
+          container.appendChild(wrap);
+        }
+
+        return { el: container, _matched: matched };
+      };
+
+      for (const plc of state.cfgTree || []) {
+        const k = `plc:${plc.id}`;
+        const rootNode = build(plc, k, null);
+        if (rootNode) root.appendChild(rootNode.el);
+      }
+    }
+
+    function renderGrantsList() {
+      const box = $("grants-list");
+      if (!box) return;
+
+      const grants = state.access.grants || [];
+      if (!state.access.principalId) {
+        box.textContent = "Select a principal to load grants.";
+        box.classList.add("muted");
+        return;
+      }
+
+      if (!grants.length) {
+        box.textContent = "No explicit grants for this principal.";
+        box.classList.add("muted");
+        return;
+      }
+
+      box.classList.remove("muted");
+      box.innerHTML = "";
+
+      // Resolve display names from cfgIndex if available
+      const resolveName = (g) => {
+        const key = `${g.resource_type}:${g.resource_id}`;
+        const info = state.cfgIndex.get(key);
+        return info?.name || key;
+      };
+
+      for (const g of grants) {
+        const name = resolveName(g);
+        const top = el("div", { class: "top" }, [
+          el("div", {}, [
+            el("div", { style: "font-weight:700", text: name }),
+            el("div", { class: "sub", text: `${g.resource_type} #${g.resource_id}` }),
+          ]),
+          el("div", { class: "actions-group" }, [
+            el("span", { class: `badge ${g.access_level === "write" ? "write" : "read"} explicit`, text: g.access_level }),
+            g.resource_type !== "datapoint" && g.include_descendants
+              ? el("span", { class: "badge explicit", text: "Desc" })
+              : null,
+            el("button", {
+              class: "btn small danger",
+              type: "button",
+              dataset: { grantId: String(g.id) },
+              text: "Remove",
+            }),
+          ]),
+        ]);
+
+        box.appendChild(el("div", { class: "item" }, [top]));
+      }
+    }
+
+    function renderAccessPreview() {
+      const box = $("access-preview");
+      if (!box) return;
+
+      const key = state.access.selectedKey;
+      if (!key) {
+        box.textContent = "Select a node to see effective access.";
+        box.classList.add("muted");
+        return;
+      }
+
+      const info = state.cfgIndex.get(key);
+      if (!info) return;
+
+      // For preview, compute effective by walking ancestors with include_descendants
+      const chain = [];
+      let curKey = key;
+      while (curKey) {
+        const i = state.cfgIndex.get(curKey);
+        if (!i) break;
+        chain.unshift(i);
+        curKey = i.parentKey;
+      }
+
+      let inherited = null;
+      let computed = null;
+      for (const i of chain) {
+        computed = computeEffective(i, inherited);
+        // update inherited candidate for descendants (same logic as in render)
+        if (i.type !== "datapoint") {
+          const eg = computed.explicit;
+          if (eg && eg.include_descendants) {
+            const candidate = { level: eg.access_level, sourceGrant: eg, sourceKey: i.key };
+            if (!inherited) inherited = candidate;
+            else {
+              if (accessRank(candidate.level) > accessRank(inherited.level)) inherited = candidate;
+              else if (accessRank(candidate.level) === accessRank(inherited.level)) inherited = candidate;
+            }
+          }
+        }
+      }
+
+      const explicit = state.access.grantByKey.get(key) || null;
+      const effective = computed?.effective || null;
+      const source = computed?.sourceKind === "explicit" ? "Explicit grant" : computed?.sourceKind === "inherited" ? `Inherited from ${computed?.source?.resource_type} #${computed?.source?.resource_id}` : "None";
+
+      box.classList.remove("muted");
+      box.innerHTML = "";
+
+      const quickActions = [];
+      const hasPrincipal = !!state.access.principalId;
+
+      if (hasPrincipal) {
+        // Quick actions for the selected node. These simply upsert the explicit grant.
+        if (info.type === "plc" || info.type === "container" || info.type === "equipment") {
+          quickActions.push(
+            el("button", { class: "btn small", type: "button", text: "Grant Read (Desc)", onclick: () => quickGrant(key, "read", true) })
+          );
+          quickActions.push(
+            el("button", { class: "btn small", type: "button", text: "Grant Write (Desc)", onclick: () => quickGrant(key, "write", true) })
+          );
+        } else if (info.type === "datapoint") {
+          quickActions.push(
+            el("button", { class: "btn small", type: "button", text: "Grant Read", onclick: () => quickGrant(key, "read", false) })
+          );
+          quickActions.push(
+            el("button", { class: "btn small", type: "button", text: "Grant Write", onclick: () => quickGrant(key, "write", false) })
+          );
+        }
+
+        if (explicit?.id) {
+          quickActions.push(
+            el("button", { class: "btn small danger", type: "button", text: "Clear Explicit", onclick: () => deleteGrantById(explicit.id) })
+          );
+        }
+      }
+
+      box.appendChild(el("div", { class: "item" }, [
+        el("div", { class: "top" }, [
+          el("div", {}, [
+            el("div", { style: "font-weight:700", text: info.name }),
+            el("div", { class: "sub", text: `${info.type} #${info.id}` }),
+          ]),
+          el("div", { class: "actions-group" }, [
+            effective
+              ? el("span", { class: `badge ${effective === "write" ? "write" : "read"} ${computed.sourceKind === "explicit" ? "explicit" : "inherited"}`, text: `Effective ${effective}` })
+              : el("span", { class: "badge", text: "Effective none" }),
+          ]),
+        ]),
+        el("div", { class: "sub", text: `Source: ${source}` }),
+        explicit
+          ? el("div", { class: "sub", text: `Explicit: ${explicit.access_level}${explicit.resource_type !== "datapoint" ? ` (desc=${explicit.include_descendants ? "on" : "off"})` : ""}` })
+          : el("div", { class: "sub", text: "Explicit: none" }),
+        quickActions.length
+          ? el("div", { class: "row", style: "justify-content:flex-start; gap:8px; flex-wrap:wrap; margin-top:10px;" }, quickActions)
+          : null,
+      ]));
+    }
+
+    async function quickGrant(nodeKey, accessLevel, includeDescendants) {
+      const pid = state.access.principalId;
+      const ptype = state.access.principalType;
+      if (!pid) return;
+
+      const info = state.cfgIndex.get(nodeKey);
+      if (!info) return;
+
+      const url = ptype === "role" ? `/admin/access/roles/${pid}/grants` : `/admin/access/users/${pid}/grants`;
+      const include_descendants =
+        info.type === "plc" || info.type === "container" || info.type === "equipment" ? !!includeDescendants : false;
+
+      try {
+        await api.put(url, {
+          json: {
+            resource_type: info.type,
+            resource_id: info.id,
+            access_level: accessLevel,
+            include_descendants,
+          },
+        });
+        toast("Grant saved");
+        await refreshGrants();
+        renderAccessPreview();
+      } catch (err) {
+        toast(err?.message || "Failed to save grant", "error");
+      }
+    }
+
+    async function onGrantToggleChanged(nodeKey) {
+      const pid = state.access.principalId;
+      const ptype = state.access.principalType;
+      if (!pid) return;
+
+      const info = state.cfgIndex.get(nodeKey);
+      if (!info) return;
+
+      const node = qs(`[data-node-key="${CSS.escape(nodeKey)}"]`, $("access-tree"));
+      if (!node) return;
+
+      const read = node.querySelector('input[data-grant-toggle="read"]');
+      const write = node.querySelector('input[data-grant-toggle="write"]');
+      const desc = node.querySelector('input[data-grant-toggle="desc"]');
+
+      // Normalize: write => read, !read => !write
+      if (write?.checked) read.checked = true;
+      if (!read?.checked && write) write.checked = false;
+
+      // enable/disable desc toggle
+      if (desc) {
+        desc.disabled = !read.checked;
+        desc.closest(".switch")?.classList.toggle("disabled", !read.checked);
+      }
+
+      const existing = state.access.grantByKey.get(nodeKey) || null;
+
+      const level = write?.checked ? "write" : read?.checked ? "read" : null;
+      const include_descendants =
+        info.type === "plc" || info.type === "container" || info.type === "equipment" ? !!desc?.checked : false;
+
+      try {
+        if (!level) {
+          if (existing) {
+            await deleteGrantById(existing.id, { confirm: false });
+          }
+          return;
+        }
+
+        const url = ptype === "role" ? `/admin/access/roles/${pid}/grants` : `/admin/access/users/${pid}/grants`;
+        await api.put(url, {
+          json: {
+            resource_type: info.type,
+            resource_id: info.id,
+            access_level: level,
+            include_descendants,
+          },
+        });
+
+        toast("Grant saved");
+        await refreshGrants();
+      } catch (err) {
+        toast(err?.message || "Failed to update grant", "error");
+        await refreshGrants();
+      }
+    }
+
+    async function deleteGrantById(grantId, opts = {}) {
+      const { confirm = true } = opts || {};
+      const pid = state.access.principalId;
+      const ptype = state.access.principalType;
+      if (!pid || !grantId) return;
+
+      if (confirm && !confirmDanger("Remove this explicit grant?")) return;
+
+      try {
+        const url =
+          ptype === "role"
+            ? `/admin/access/roles/${pid}/grants/${grantId}`
+            : `/admin/access/users/${pid}/grants/${grantId}`;
+        await api.delete(url);
+        toast("Grant removed");
+        await refreshGrants();
+      } catch (err) {
+        toast(err?.message || "Failed to remove grant", "error");
+      }
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Boot
+  // -----------------------------
+  document.addEventListener("DOMContentLoaded", async () => {
+    if (document.body.classList.contains("admin-body")) {
+      await initLoginPage();
+      return;
+    }
+    if (document.body.classList.contains("admin-app")) {
+      await initAdminApp();
+      return;
+    }
+  });
+})();

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import logging
+import threading
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from sqlalchemy import inspect, text
+
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from sunny_scada.api.errors import register_error_handlers
-from sunny_scada.api.middleware import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from sunny_scada.api.middleware import AuthEnforcementMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from sunny_scada.core.settings import Settings
 from sunny_scada.data_storage import DataStorage
 from sunny_scada.db.base import Base
@@ -32,8 +36,13 @@ from sunny_scada.services.iqf_service import IQFService
 from sunny_scada.services.maintenance_scheduler import MaintenanceScheduler
 from sunny_scada.services.monitoring_service import MonitoringService
 from sunny_scada.services.polling_service import PollingService
+from sunny_scada.services.alarm_broadcaster import AlarmBroadcaster
+from sunny_scada.services.command_broadcaster import CommandBroadcaster
+from sunny_scada.services.alarm_manager import AlarmManager
+from sunny_scada.services.alarm_monitor import AlarmMonitor
 from sunny_scada.services.rate_limiter import RateLimiter
 from sunny_scada.services.retention_service import RetentionService
+from sunny_scada.services.access_control_service import AccessControlService
 
 from sunny_scada.api.routers import (
     health,
@@ -42,6 +51,7 @@ from sunny_scada.api.routers import (
     plc,
     iqf,
     auth,
+    oauth,
     config_admin,
     commands,
     logs,
@@ -50,9 +60,36 @@ from sunny_scada.api.routers import (
     maintenance,
     trends,
     system_config,
+    ws_alarms,
+    ws_commands,
+    admin_alarm_rules,
+    admin_alarm_log,
+    frontend_alarms,
 )
+from sunny_scada.api.deps import require_permission
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_sqlite_compat_columns(engine) -> None:
+    """Apply lightweight SQLite schema compatibility patches for legacy DBs.
+
+    This avoids runtime 500s when code expects columns introduced by newer
+    Alembic revisions but the local SQLite file is behind.
+    """
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "cfg_data_point_bits" not in tables:
+        return
+
+    columns = {c.get("name") for c in inspector.get_columns("cfg_data_point_bits")}
+    if "bit_class" not in columns:
+        logger.warning("Applying SQLite compatibility patch: add cfg_data_point_bits.bit_class")
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cfg_data_point_bits ADD COLUMN bit_class VARCHAR(100)"))
 
 
 def _repo_root() -> Path:
@@ -86,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.db_sessionmaker = db_rt.SessionLocal
         if settings.auto_create_db:
             Base.metadata.create_all(bind=db_rt.engine)
+        _ensure_sqlite_compat_columns(db_rt.engine)
 
         # --- Auth/Audit ---
         if not settings.jwt_secret_key:
@@ -94,12 +132,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.auth_service = AuthService(
             jwt_secret_key=settings.jwt_secret_key,
             jwt_issuer=settings.jwt_issuer,
+            jwt_audience=settings.jwt_audience,
+            jwt_leeway_s=settings.jwt_leeway_s,
             access_ttl_s=settings.access_token_ttl_s,
+            app_access_ttl_s=settings.app_access_token_ttl_s,
             refresh_ttl_s=settings.refresh_token_ttl_s,
             lockout_threshold=settings.auth_lockout_threshold,
             lockout_duration_s=settings.auth_lockout_duration_s,
         )
         app.state.audit_service = AuditService()
+        app.state.access_control_service = AccessControlService()
 
         # Bootstrap initial admin if DB empty
         try:
@@ -124,10 +166,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         username=settings.initial_admin_username,
                         password=settings.initial_admin_password,
                         permissions=[
+                            "plc:read",
+                            "plc:write",
                             "config:read",
                             "config:write",
                             "command:read",
                             "command:write",
+                            "iqf:control",
                             "alarms:*",
                             "maintenance:*",
                             "inventory:write",
@@ -160,7 +205,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.plc_writer = PLCWriter(
             modbus=app.state.modbus,
-            data_points_file=_resolve(settings.data_points_file),
         )
 
         app.state.data_points_service = DataPointsService(_resolve(settings.data_points_file))
@@ -179,11 +223,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.alarm_service.start()
 
+        # --- Unified alarm management (DB-backed + websocket streaming) ---
+        loop = asyncio.get_running_loop()
+        app.state.alarm_broadcaster = AlarmBroadcaster(loop)
+        app.state.command_broadcaster = CommandBroadcaster(loop)
+        app.state.alarm_manager = AlarmManager()
+        app.state.alarm_monitor = AlarmMonitor(
+            sessionmaker=db_rt.SessionLocal,
+            alarm_manager=app.state.alarm_manager,
+            broadcaster=app.state.alarm_broadcaster,
+        )
+
         # --- Polling/monitoring ---
         app.state.poller = PollingService(
             plc_reader=app.state.plc_reader,
             interval_s=settings.polling_interval_plc_s,
             enable=settings.enable_plc_polling,
+            alarm_monitor=getattr(app.state, "alarm_monitor", None),
+            db_sessionmaker=db_rt.SessionLocal,
         )
         app.state.monitoring = MonitoringService(
             storage=app.state.storage,
@@ -208,6 +265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.command_executor = CommandExecutor(
             sessionmaker=db_rt.SessionLocal,
             writer=app.state.plc_writer,
+            broadcaster=app.state.command_broadcaster.broadcast,
             max_retries=settings.modbus_retries,
             backoff_s=settings.modbus_backoff_s,
         )
@@ -215,10 +273,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.command_service = CommandService(
             modbus=app.state.modbus,
-            data_points=app.state.data_points_service,
             executor=app.state.command_executor,
             rate_limiter=app.state.rate_limiter,
             audit=app.state.audit_service,
+            broadcaster=app.state.command_broadcaster.broadcast,
             rate_limit_per_minute=settings.command_rate_limit_per_minute,
         )
 
@@ -277,6 +335,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.scheduler = sched
 
         # start background services
+        logger.debug("About to call poller.start(); enable_plc_polling=%s", settings.enable_plc_polling)
+
         app.state.poller.start()
         app.state.monitoring.start()
 
@@ -284,24 +344,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             logger.info("Shutting down Sunny SCADA app...")
-            try:
-                app.state.poller.stop()
-                app.state.monitoring.stop()
-                app.state.command_executor.stop()
-                app.state.alarm_service.stop()
-                if app.state.scheduler:
-                    app.state.scheduler.shutdown(wait=False)
-                app.state.modbus.close()
-            finally:
+            
+            def _do_shutdown():
+                """Perform actual shutdown in a thread with timeout."""
                 try:
-                    app.state.db_engine.dispose()
-                except Exception:
-                    pass
+                    # Shut down services with timeout protection
+                    logger.info("Stopping poller...")
+                    app.state.poller.stop()
+                    
+                    logger.info("Stopping monitoring...")
+                    app.state.monitoring.stop()
+                    
+                    logger.info("Stopping command executor...")
+                    app.state.command_executor.stop()
+                    
+                    logger.info("Stopping alarm service...")
+                    app.state.alarm_service.stop()
+                    
+                    logger.info("Shutting down scheduler...")
+                    if app.state.scheduler:
+                        app.state.scheduler.shutdown(wait=False)
+                    
+                    logger.info("Closing modbus...")
+                    app.state.modbus.close()
+                except Exception as e:
+                    logger.exception("Error during service shutdown: %s", e)
+                finally:
+                    logger.info("Disposing database...")
+                    try:
+                        app.state.db_engine.dispose()
+                    except Exception:
+                        pass
+                    logger.info("Sunny SCADA app shutdown complete.")
+            
+            # Run shutdown in a thread with a 15-second timeout
+            # If shutdown takes too long, we force exit anyway
+            shutdown_thread = threading.Thread(target=_do_shutdown, daemon=True, name="shutdown")
+            shutdown_thread.start()
+            shutdown_thread.join(timeout=15)
+            
+            if shutdown_thread.is_alive():
+                logger.warning("Shutdown timed out after 15 seconds, forcing exit...")
 
-    app = FastAPI(lifespan=lifespan)
+            logger.info("Sunny SCADA app shutdown complete.")
+
+    is_dev = settings.env.lower() in ("dev", "development", "local")
+    app = FastAPI(
+        lifespan=lifespan,
+        docs_url="/docs" if is_dev else None,
+        redoc_url="/redoc" if is_dev else None,
+        openapi_url="/openapi.json" if is_dev else None,
+    )
 
     # Middleware
     app.add_middleware(RequestSizeLimitMiddleware, max_bytes=settings.max_request_size_bytes)
+    app.add_middleware(AuthEnforcementMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
     # CORS
@@ -319,10 +416,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
     app.mount("/frontend", StaticFiles(directory=static_dir, html=True), name="frontend")
 
+    # Backwards-compatible static paths used by the legacy static UI.
+    # (These map to subdirectories inside STATIC_DIR.)
+    for name in ("scripts", "styles", "images", "sounds", "pages"):
+        p = Path(static_dir) / name
+        if p.exists() and p.is_dir():
+            app.mount(f"/{name}", StaticFiles(directory=str(p), html=True), name=name)
+
     @app.get("/")
     def serve_index():
         index_path = Path(static_dir) / "pages" / "index.html"
         return FileResponse(str(index_path))
+
+    @app.get("/admin-panel", include_in_schema=False)
+    def serve_admin_panel():
+        # NOTE: the admin panel handles auth client-side (JWT stored in local/session storage).
+        admin_path = Path(static_dir) / "pages" / "admin" / "index.html"
+        return FileResponse(str(admin_path))
+
+    @app.get("/admin-panel/login", include_in_schema=False)
+    def serve_admin_login():
+        login_path = Path(static_dir) / "pages" / "admin" / "login.html"
+        return FileResponse(str(login_path))
 
     # Routers
     app.include_router(health.router)
@@ -331,12 +446,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(plc.router)
     app.include_router(iqf.router)
     app.include_router(auth.router)
+    app.include_router(oauth.router)
     app.include_router(admin.router)
 
     # Cycle2
     app.include_router(commands.router)
     app.include_router(logs.router)
     app.include_router(alarms.router)
+    app.include_router(admin_alarm_rules.router)
+    app.include_router(admin_alarm_log.router)
+    app.include_router(frontend_alarms.router)
+    app.include_router(ws_alarms.router)
+    app.include_router(ws_commands.router)
     app.include_router(maintenance.router)
     app.include_router(trends.router)
 
@@ -348,7 +469,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Backward-compatible config file access: /config/<filename>
     @app.get("/config/{file_name}", tags=["config-files"], include_in_schema=False)
-    def get_config_file(file_name: str):
+    def get_config_file(file_name: str, _perm=Depends(require_permission("config:read"))):
         if "/" in file_name or "\\" in file_name or ".." in file_name or file_name.startswith("."):
             raise HTTPException(status_code=400, detail="Invalid file name")
         p = Path(config_dir) / file_name

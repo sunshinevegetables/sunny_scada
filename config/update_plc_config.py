@@ -1,4 +1,8 @@
 import yaml
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # Define start address and number of points
 start_address = 40001
@@ -19,4 +23,4 @@ with open(output_file, "w") as file:
         Dumper=yaml.Dumper
     )
 
-print(f"Generated {output_file} with {count} data points.")
+logger.info("Generated %s with %s data points.", output_file, count)

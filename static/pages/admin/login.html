@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SCADA Admin Login</title>
+    <link rel="stylesheet" href="/styles/admin.css" />
+  </head>
+  <body class="admin-body">
+    <div class="card">
+      <h1>Admin Panel</h1>
+      <p class="muted">Sign in to manage users, roles, configuration and access.</p>
+
+      <form id="login-form" class="form">
+        <label>
+          Username
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+
+        <label class="inline">
+          <input type="checkbox" name="remember" />
+          Remember me
+        </label>
+
+        <button class="btn primary" type="submit">Login</button>
+      </form>
+
+      <div id="login-status" class="status" aria-live="polite"></div>
+    </div>
+
+    <script src="/scripts/admin.js"></script>
+  </body>
+</html>

@@ -5,9 +5,13 @@ from typing import Optional, Dict, Any
 
 
 class BitWriteSignalRequest(BaseModel):
-    plc_type: str = Field(default="plc")
-    plc_name: str
-    register: str
+    # DB-driven mode only
+    plc: str
+    equipmentLabel: str
+    equipmentId: Optional[str] = None
+    commandTag: str
+    receiverId: Optional[str] = None
+    
     bit: int = Field(ge=0, le=15)
     value: int = Field(ge=0, le=1)
 

@@ -6,9 +6,27 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from sunny_scada.api.deps import get_db, get_current_user, get_audit_service, get_settings, require_permission
+from sunny_scada.api.deps import (
+    get_db,
+    get_current_user,
+    get_audit_service,
+    get_settings,
+    require_permission,
+    get_auth_service,
+    get_access_control_service,
+    require_resource_read,
+    require_resource_write,
+)
 from sunny_scada.core.settings import Settings
-from sunny_scada.db.models import CfgPLC, CfgContainer, CfgEquipment, CfgDataPoint
+from sunny_scada.db.models import (
+    CfgPLC,
+    CfgContainer,
+    CfgEquipment,
+    CfgDataPoint,
+    CfgDataPointClass,
+    CfgDataPointUnit,
+    CfgDataPointGroup,
+)
 from sunny_scada.services.audit_service import AuditService
 from sunny_scada.services.system_config_service import SystemConfigService, validate_ip_or_hostname
 
@@ -18,6 +36,13 @@ router = APIRouter(prefix="/api/config", tags=["system-config"])
 
 def _client_ip(request: Request) -> Optional[str]:
     return request.client.host if request.client else None
+
+
+def _is_acl_admin(db: Session, auth, user) -> bool:
+    """Users with global admin permissions can bypass object-level filtering."""
+
+    perms = auth.user_permissions(db, user)
+    return ("users:admin" in perms) or ("roles:admin" in perms)
 
 
 # ----------------
@@ -59,11 +84,13 @@ class PLCOut(BaseModel):
 class ContainerIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     type: str = Field(min_length=1, max_length=200)
+    groupId: Optional[int] = None
 
 
 class ContainerPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     type: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    groupId: Optional[int] = None
 
 
 class ContainerOut(BaseModel):
@@ -71,16 +98,19 @@ class ContainerOut(BaseModel):
     plc_id: int
     name: str
     type: str
+    groupId: Optional[int] = None
 
 
 class EquipmentIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     type: str = Field(min_length=1, max_length=200)
+    groupId: Optional[int] = None
 
 
 class EquipmentPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     type: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    groupId: Optional[int] = None
 
 
 class EquipmentOut(BaseModel):
@@ -88,6 +118,7 @@ class EquipmentOut(BaseModel):
     container_id: int
     name: str
     type: str
+    groupId: Optional[int] = None
 
 
 class DataPointIn(BaseModel):
@@ -96,7 +127,12 @@ class DataPointIn(BaseModel):
     category: str = Field(pattern=r"^(read|write)$")
     type: str = Field(pattern=r"^(INTEGER|DIGITAL|REAL)$")
     address: str = Field(min_length=1, max_length=200)
+    groupId: Optional[int] = None
+    classId: Optional[int] = None
+    unitId: Optional[int] = None
+    multiplier: float = Field(default=1.0, gt=0)
     bitLabels: Optional[Dict[int, str]] = None
+    bitPositions: Optional[Dict[int, Dict[str, Optional[str]]]] = None
 
 
 class DataPointPatch(BaseModel):
@@ -105,7 +141,12 @@ class DataPointPatch(BaseModel):
     category: Optional[str] = Field(default=None, pattern=r"^(read|write)$")
     type: Optional[str] = Field(default=None, pattern=r"^(INTEGER|DIGITAL|REAL)$")
     address: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    groupId: Optional[int] = None
+    classId: Optional[int] = None
+    unitId: Optional[int] = None
+    multiplier: Optional[float] = Field(default=None, gt=0)
     bitLabels: Optional[Dict[int, str]] = None
+    bitPositions: Optional[Dict[int, Dict[str, Optional[str]]]] = None
 
 
 class DataPointOut(BaseModel):
@@ -117,14 +158,40 @@ class DataPointOut(BaseModel):
     category: str
     type: str
     address: str
+    groupId: Optional[int] = None
+    classId: Optional[int] = None
+    unitId: Optional[int] = None
+    multiplier: int
     bitLabels: Dict[int, str] = Field(default_factory=dict)
+    bitPositions: Dict[int, Dict[str, Optional[str]]] = Field(default_factory=dict)
+
+
+class MetaOptionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class MetaOptionPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class MetaOptionOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
 
 
 def _dp_out(dp: CfgDataPoint) -> Dict[str, Any]:
     bit_labels: Dict[int, str] = {}
+    bit_positions: Dict[int, Dict[str, Optional[str]]] = {}
     if dp.type == "DIGITAL":
         for b in dp.bits or []:
             bit_labels[int(b.bit)] = b.label
+            bit_positions[int(b.bit)] = {
+                "label": b.label,
+                "class": getattr(b, "bit_class", None),
+            }
     return {
         "id": dp.id,
         "owner_type": dp.owner_type,
@@ -134,12 +201,465 @@ def _dp_out(dp: CfgDataPoint) -> Dict[str, Any]:
         "category": dp.category,
         "type": dp.type,
         "address": dp.address,
+        "groupId": dp.group_id,
+        "classId": dp.class_id,
+        "unitId": dp.unit_id,
+        "multiplier": int(dp.multiplier or 1),
         "bitLabels": bit_labels,
+        "bitPositions": bit_positions,
     }
 
 
 def _svc(settings: Settings) -> SystemConfigService:
     return SystemConfigService(digital_bit_max=settings.digital_bit_max)
+
+
+@router.get("/tree")
+def get_config_tree(
+    db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
+    _perm=Depends(require_permission("config:read")),
+):
+    """Return the full PLC→Container→Equipment hierarchy (with datapoints).
+
+    Non-admins are filtered by effective ACL read access.
+    """
+
+    is_admin = _is_acl_admin(db, auth, me)
+    ea = None if is_admin else ac.effective_access(db, me)
+
+    plcs = db.query(CfgPLC).order_by(CfgPLC.id.asc()).all()
+    containers = db.query(CfgContainer).order_by(CfgContainer.id.asc()).all()
+    equipment = db.query(CfgEquipment).order_by(CfgEquipment.id.asc()).all()
+    datapoints = db.query(CfgDataPoint).order_by(CfgDataPoint.id.asc()).all()
+
+    plc_nodes: Dict[int, Dict[str, Any]] = {}
+    for p in plcs:
+        if ea is not None and p.id not in ea.read_plc_ids:
+            continue
+        plc_nodes[p.id] = {
+            "type": "plc",
+            "id": p.id,
+            "name": p.name,
+            "ip": p.ip,
+            "port": p.port,
+            "containers": [],
+            "datapoints": [],
+        }
+
+    container_nodes: Dict[int, Dict[str, Any]] = {}
+    for c in containers:
+        if ea is not None and c.id not in ea.read_container_ids:
+            continue
+        container_nodes[c.id] = {
+            "type": "container",
+            "id": c.id,
+            "plc_id": c.plc_id,
+                "name": c.name,
+                "containerType": c.type,
+                "groupId": c.group_id,
+            "equipment": [],
+            "datapoints": [],
+        }
+
+    equipment_nodes: Dict[int, Dict[str, Any]] = {}
+    for e in equipment:
+        if ea is not None and e.id not in ea.read_equipment_ids:
+            continue
+        equipment_nodes[e.id] = {
+            "type": "equipment",
+            "id": e.id,
+            "container_id": e.container_id,
+                "name": e.name,
+                "equipmentType": e.type,
+                "groupId": e.group_id,
+            "datapoints": [],
+        }
+
+    # Attach containers → PLC
+    for c in container_nodes.values():
+        parent = plc_nodes.get(int(c["plc_id"]))
+        if parent is not None:
+            parent["containers"].append(c)
+
+    # Attach equipment → Container
+    for e in equipment_nodes.values():
+        parent = container_nodes.get(int(e["container_id"]))
+        if parent is not None:
+            parent["equipment"].append(e)
+
+    # Attach datapoints
+    for dp in datapoints:
+        if ea is not None and dp.id not in ea.read_datapoint_ids:
+            continue
+        dto = _dp_out(dp)
+        if dp.owner_type == "plc":
+            node = plc_nodes.get(int(dp.owner_id))
+            if node is not None:
+                node["datapoints"].append(dto)
+        elif dp.owner_type == "container":
+            node = container_nodes.get(int(dp.owner_id))
+            if node is not None:
+                node["datapoints"].append(dto)
+        elif dp.owner_type == "equipment":
+            node = equipment_nodes.get(int(dp.owner_id))
+            if node is not None:
+                node["datapoints"].append(dto)
+
+    # Sort children (stable UI)
+    for p in plc_nodes.values():
+        p["containers"].sort(key=lambda x: x["id"])
+        p["datapoints"].sort(key=lambda x: x["id"])
+        for c in p["containers"]:
+            c["equipment"].sort(key=lambda x: x["id"])
+            c["datapoints"].sort(key=lambda x: x["id"])
+            for e in c["equipment"]:
+                e["datapoints"].sort(key=lambda x: x["id"])
+
+    return sorted(plc_nodes.values(), key=lambda x: x["id"])
+
+
+# ----------------
+# Datapoint Meta (Classes / Units / Groups)
+# ----------------
+
+
+@router.get("/datapoint-classes", response_model=list[MetaOptionOut])
+def list_datapoint_classes(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("config:read")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    items = svc.list_datapoint_classes(db)
+    return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
+
+
+@router.post("/datapoint-classes", response_model=MetaOptionOut)
+def create_datapoint_class(
+    req: MetaOptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    try:
+        obj = svc.create_datapoint_class(db, name=req.name, description=req.description, user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_class.create",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "name": obj.name},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.patch("/datapoint-classes/{class_id}", response_model=MetaOptionOut)
+def patch_datapoint_class(
+    class_id: int,
+    req: MetaOptionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_class(db, class_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Class not found")
+    try:
+        obj = svc.update_datapoint_class(db, obj, patch=req.model_dump(exclude_unset=True), user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_class.update",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "patch": req.model_dump(exclude_unset=True)},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.delete("/datapoint-classes/{class_id}")
+def delete_datapoint_class(
+    class_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_class(db, class_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Class not found")
+    name = obj.name
+    try:
+        svc.delete_datapoint_class(db, obj)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_class.delete",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=name,
+            metadata={"id": class_id, "name": name},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+@router.get("/datapoint-units", response_model=list[MetaOptionOut])
+def list_datapoint_units(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("config:read")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    items = svc.list_datapoint_units(db)
+    return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
+
+
+@router.post("/datapoint-units", response_model=MetaOptionOut)
+def create_datapoint_unit(
+    req: MetaOptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    try:
+        obj = svc.create_datapoint_unit(db, name=req.name, description=req.description, user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_unit.create",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "name": obj.name},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.patch("/datapoint-units/{unit_id}", response_model=MetaOptionOut)
+def patch_datapoint_unit(
+    unit_id: int,
+    req: MetaOptionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_unit(db, unit_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    try:
+        obj = svc.update_datapoint_unit(db, obj, patch=req.model_dump(exclude_unset=True), user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_unit.update",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "patch": req.model_dump(exclude_unset=True)},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.delete("/datapoint-units/{unit_id}")
+def delete_datapoint_unit(
+    unit_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_unit(db, unit_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    name = obj.name
+    try:
+        svc.delete_datapoint_unit(db, obj)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_unit.delete",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=name,
+            metadata={"id": unit_id, "name": name},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+@router.get("/datapoint-groups", response_model=list[MetaOptionOut])
+def list_datapoint_groups(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("config:read")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    items = svc.list_datapoint_groups(db)
+    return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
+
+
+@router.post("/datapoint-groups", response_model=MetaOptionOut)
+def create_datapoint_group(
+    req: MetaOptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    try:
+        obj = svc.create_datapoint_group(db, name=req.name, description=req.description, user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_group.create",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "name": obj.name},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.patch("/datapoint-groups/{group_id}", response_model=MetaOptionOut)
+def patch_datapoint_group(
+    group_id: int,
+    req: MetaOptionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_group(db, group_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        obj = svc.update_datapoint_group(db, obj, patch=req.model_dump(exclude_unset=True), user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_group.update",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "patch": req.model_dump(exclude_unset=True)},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.delete("/datapoint-groups/{group_id}")
+def delete_datapoint_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_datapoint_group(db, group_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Group not found")
+    name = obj.name
+    try:
+        svc.delete_datapoint_group(db, obj)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.datapoint_group.delete",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=name,
+            metadata={"id": group_id, "name": name},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
 
 
 # ----------------
@@ -150,11 +670,18 @@ def _svc(settings: Settings) -> SystemConfigService:
 @router.get("/plcs", response_model=list[PLCOut])
 def list_plcs(
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
-    return [PLCOut(id=p.id, name=p.name, ip=p.ip, port=p.port) for p in svc.list_plcs(db)]
+    plcs = svc.list_plcs(db)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        plcs = [p for p in plcs if p.id in ea.read_plc_ids]
+    return [PLCOut(id=p.id, name=p.name, ip=p.ip, port=p.port) for p in plcs]
 
 
 @router.post("/plcs", response_model=PLCOut)
@@ -192,6 +719,7 @@ def get_plc(
     plc_id: int,
     db: Session = Depends(get_db),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("plc")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -210,6 +738,7 @@ def patch_plc(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("plc")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -245,6 +774,7 @@ def delete_plc(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("plc")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -281,13 +811,20 @@ def delete_plc(
 def list_containers(
     plc_id: int,
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("plc")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
     if not svc.get_plc(db, plc_id):
         raise HTTPException(status_code=404, detail="PLC not found")
     items = svc.list_containers(db, plc_id)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        items = [c for c in items if c.id in ea.read_container_ids]
     return [ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type) for c in items]
 
 
@@ -300,6 +837,7 @@ def create_container(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("plc")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -307,7 +845,7 @@ def create_container(
     if not plc:
         raise HTTPException(status_code=404, detail="PLC not found")
     try:
-        c = svc.create_container(db, plc=plc, name=req.name, type_=req.type, user_id=me.id)
+        c = svc.create_container(db, plc=plc, name=req.name, type_=req.type, group_id=req.groupId, user_id=me.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
@@ -321,7 +859,7 @@ def create_container(
         )
     except Exception:
         pass
-    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type)
+    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type, groupId=c.group_id)
 
 
 @router.get("/containers/{container_id}", response_model=ContainerOut)
@@ -329,6 +867,7 @@ def get_container(
     container_id: int,
     db: Session = Depends(get_db),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("container")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -347,6 +886,7 @@ def patch_container(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("container")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -368,7 +908,7 @@ def patch_container(
         )
     except Exception:
         pass
-    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type)
+    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type, groupId=c.group_id)
 
 
 @router.delete("/containers/{container_id}")
@@ -380,6 +920,7 @@ def delete_container(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("container")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -414,13 +955,20 @@ def delete_container(
 def list_equipment(
     container_id: int,
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("container")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
     if not svc.get_container(db, container_id):
         raise HTTPException(status_code=404, detail="Container not found")
     items = svc.list_equipment(db, container_id)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        items = [e for e in items if e.id in ea.read_equipment_ids]
     return [EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type) for e in items]
 
 
@@ -433,6 +981,7 @@ def create_equipment(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("container")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -440,7 +989,7 @@ def create_equipment(
     if not container:
         raise HTTPException(status_code=404, detail="Container not found")
     try:
-        e = svc.create_equipment(db, container=container, name=req.name, type_=req.type, user_id=me.id)
+        e = svc.create_equipment(db, container=container, name=req.name, type_=req.type, group_id=req.groupId, user_id=me.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
@@ -454,7 +1003,7 @@ def create_equipment(
         )
     except Exception:
         pass
-    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type)
+    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type, groupId=e.group_id)
 
 
 @router.get("/equipment/{equipment_id}", response_model=EquipmentOut)
@@ -462,6 +1011,7 @@ def get_equipment(
     equipment_id: int,
     db: Session = Depends(get_db),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("equipment")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -480,6 +1030,7 @@ def patch_equipment(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("equipment")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -501,7 +1052,7 @@ def patch_equipment(
         )
     except Exception:
         pass
-    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type)
+    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type, groupId=e.group_id)
 
 
 @router.delete("/equipment/{equipment_id}")
@@ -513,6 +1064,7 @@ def delete_equipment(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("equipment")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -561,12 +1113,20 @@ def _ensure_owner_exists(db: Session, owner_type: str, owner_id: int) -> None:
 def list_plc_data_points(
     plc_id: int,
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("plc")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "plc", plc_id)
     svc = _svc(settings)
-    return [DataPointOut(**_dp_out(dp)) for dp in svc.list_data_points(db, owner_type="plc", owner_id=plc_id)]
+    dps = svc.list_data_points(db, owner_type="plc", owner_id=plc_id)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        dps = [dp for dp in dps if dp.id in ea.read_datapoint_ids]
+    return [DataPointOut(**_dp_out(dp)) for dp in dps]
 
 
 @router.post("/plcs/{plc_id}/data-points", response_model=DataPointOut)
@@ -578,6 +1138,7 @@ def create_plc_data_point(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("plc")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "plc", plc_id)
@@ -592,7 +1153,12 @@ def create_plc_data_point(
             category=req.category,
             type_=req.type,
             address=req.address,
+            group_id=req.groupId,
+            class_id=req.classId,
+            unit_id=req.unitId,
+            multiplier=req.multiplier,
             bit_labels=req.bitLabels,
+            bit_positions=req.bitPositions,
             user_id=me.id,
         )
     except ValueError as e:
@@ -615,12 +1181,20 @@ def create_plc_data_point(
 def list_container_data_points(
     container_id: int,
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("container")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "container", container_id)
     svc = _svc(settings)
-    return [DataPointOut(**_dp_out(dp)) for dp in svc.list_data_points(db, owner_type="container", owner_id=container_id)]
+    dps = svc.list_data_points(db, owner_type="container", owner_id=container_id)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        dps = [dp for dp in dps if dp.id in ea.read_datapoint_ids]
+    return [DataPointOut(**_dp_out(dp)) for dp in dps]
 
 
 @router.post("/containers/{container_id}/data-points", response_model=DataPointOut)
@@ -632,6 +1206,7 @@ def create_container_data_point(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("container")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "container", container_id)
@@ -646,7 +1221,12 @@ def create_container_data_point(
             category=req.category,
             type_=req.type,
             address=req.address,
+            group_id=req.groupId,
+            class_id=req.classId,
+            unit_id=req.unitId,
+            multiplier=req.multiplier,
             bit_labels=req.bitLabels,
+            bit_positions=req.bitPositions,
             user_id=me.id,
         )
     except ValueError as e:
@@ -669,12 +1249,20 @@ def create_container_data_point(
 def list_equipment_data_points(
     equipment_id: int,
     db: Session = Depends(get_db),
+    me=Depends(get_current_user),
+    auth=Depends(get_auth_service),
+    ac=Depends(get_access_control_service),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("equipment")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "equipment", equipment_id)
     svc = _svc(settings)
-    return [DataPointOut(**_dp_out(dp)) for dp in svc.list_data_points(db, owner_type="equipment", owner_id=equipment_id)]
+    dps = svc.list_data_points(db, owner_type="equipment", owner_id=equipment_id)
+    if not _is_acl_admin(db, auth, me):
+        ea = ac.effective_access(db, me)
+        dps = [dp for dp in dps if dp.id in ea.read_datapoint_ids]
+    return [DataPointOut(**_dp_out(dp)) for dp in dps]
 
 
 @router.post("/equipment/{equipment_id}/data-points", response_model=DataPointOut)
@@ -686,6 +1274,7 @@ def create_equipment_data_point(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("equipment")),
     settings: Settings = Depends(get_settings),
 ):
     _ensure_owner_exists(db, "equipment", equipment_id)
@@ -700,7 +1289,12 @@ def create_equipment_data_point(
             category=req.category,
             type_=req.type,
             address=req.address,
+            group_id=req.groupId,
+            class_id=req.classId,
+            unit_id=req.unitId,
+            multiplier=req.multiplier,
             bit_labels=req.bitLabels,
+            bit_positions=req.bitPositions,
             user_id=me.id,
         )
     except ValueError as e:
@@ -724,6 +1318,7 @@ def get_data_point(
     data_point_id: int,
     db: Session = Depends(get_db),
     _perm=Depends(require_permission("config:read")),
+    _acl=Depends(require_resource_read("datapoint")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -742,6 +1337,7 @@ def patch_data_point(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("datapoint")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)
@@ -774,6 +1370,7 @@ def delete_data_point(
     audit: AuditService = Depends(get_audit_service),
     me=Depends(get_current_user),
     _perm=Depends(require_permission("config:write")),
+    _acl=Depends(require_resource_write("datapoint")),
     settings: Settings = Depends(get_settings),
 ):
     svc = _svc(settings)

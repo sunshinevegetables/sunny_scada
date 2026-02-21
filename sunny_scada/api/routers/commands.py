@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 
 from sunny_scada.api.deps import (
     get_db,
-    get_current_user,
+    get_current_principal,
     get_command_service,
     require_permission,
 )
+from sunny_scada.api.security import Principal
 from sunny_scada.db.models import Command, CommandEvent
+from sunny_scada.services.command_log_payload import build_command_log_payload
 
 router = APIRouter(prefix="/commands", tags=["commands"])
 
@@ -35,7 +37,7 @@ def create_command(
     req: CreateCommandRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    principal: Principal = Depends(get_current_principal),
     svc=Depends(get_command_service),
     _perm=Depends(require_permission("command:write")),
 ):
@@ -46,7 +48,7 @@ def create_command(
         kind=req.kind or "",
         value=req.value,
         bit=req.bit,
-        user_id=user.id,
+        user_id=principal.user.id if principal.user else None,
         client_ip=request.client.host if request.client else None,
     )
     return CreateCommandResponse(command_id=res.command_id, status=res.status)
@@ -55,7 +57,7 @@ def create_command(
 @router.get("")
 def list_commands(
     db: Session = Depends(get_db),
-    _perm=Depends(require_permission("command:read")),
+    _perm=Depends(require_permission("command:write")),
     plc_name: str | None = None,
     datapoint_id: str | None = None,
     status: str | None = None,
@@ -94,7 +96,7 @@ def list_commands(
 def get_command(
     command_id: str,
     db: Session = Depends(get_db),
-    _perm=Depends(require_permission("command:read")),
+    _perm=Depends(require_permission("command:write")),
 ):
     cmd = db.query(Command).filter(Command.command_id == command_id).one_or_none()
     if not cmd:
@@ -128,8 +130,8 @@ def cancel_command(
     command_id: str,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-    _perm=Depends(require_permission("command:read")),
+    principal: Principal = Depends(get_current_principal),
+    _perm=Depends(require_permission("command:write")),
 ):
     cmd = db.query(Command).filter(Command.command_id == command_id).one_or_none()
     if not cmd:
@@ -139,6 +141,22 @@ def cancel_command(
     cmd.status = "cancelled"
     cmd.error_message = "cancelled"
     db.add(cmd)
-    db.add(CommandEvent(command_row_id=cmd.id, status="cancelled", message="cancelled", meta={"by": user.username}))
+    evt = CommandEvent(
+        command_row_id=cmd.id,
+        status="cancelled",
+        message="cancelled",
+        meta={"by": (principal.user.username if principal.user else principal.app_client.id)},
+    )
+    db.add(evt)
     db.commit()
+    db.refresh(cmd)
+    db.refresh(evt)
+
+    broadcaster = getattr(request.app.state, "command_broadcaster", None)
+    if broadcaster:
+        try:
+            broadcaster(build_command_log_payload(cmd, evt))
+        except Exception:
+            pass
+
     return {"status": "cancelled"}

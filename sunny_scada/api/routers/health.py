@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from sunny_scada.api.deps import get_modbus, get_db
+from sunny_scada.api.deps import get_modbus, get_db, require_permission
 
 router = APIRouter(tags=["health"])
 
@@ -23,10 +23,10 @@ def health(db: Session = Depends(get_db)):
 
 
 @router.get("/modbus/health")
-def modbus_health(modbus=Depends(get_modbus)):
+def modbus_health(modbus=Depends(get_modbus), _perm=Depends(require_permission("plc:read"))):
     return {"plcs": modbus.health_snapshot()}
 
 
 @router.get("/health/plcs")
-def health_plcs(modbus=Depends(get_modbus)):
+def health_plcs(modbus=Depends(get_modbus), _perm=Depends(require_permission("plc:read"))):
     return {"plcs": modbus.health_snapshot()}

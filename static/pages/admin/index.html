@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SCADA Admin Panel</title>
+    <link rel="stylesheet" href="/styles/admin.css?v=20260221" />
+  </head>
+  <body class="admin-app">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-title">SCADA</div>
+          <div class="brand-sub">Admin Panel</div>
+        </div>
+
+          <nav class="nav">
+          <a href="#users" data-view="users" class="nav-link">Users</a>
+          <a href="#roles" data-view="roles" class="nav-link">Roles</a>
+          <a href="#plc" data-view="plc" class="nav-link">PLC Builder</a>
+          <a href="#meta" data-view="meta" class="nav-link">Datapoint Meta</a>
+          <a href="#access" data-view="access" class="nav-link">Access Control</a>
+          <a href="#alarms" data-view="alarms" class="nav-link">Manage Alarms</a>
+          <a href="#alarm-log" data-view="alarm-log" class="nav-link">Alarm Log</a>
+          <a href="#command-log" data-view="command-log" class="nav-link">Command Log</a>
+        </nav>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="who">
+            <span class="muted">Signed in as</span>
+            <strong id="me-name">...</strong>
+          </div>
+          <div class="top-actions">
+            <button id="logout-btn" class="btn">Logout</button>
+          </div>
+        </header>
+
+        <main class="content">
+          <!-- USERS -->
+          <section id="view-users" class="view">
+            <div class="view-header">
+              <h2>Users</h2>
+              <div class="actions">
+                <button id="btn-user-new" class="btn primary">New User</button>
+                <button id="btn-users-refresh" class="btn">Refresh</button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <input id="users-search" class="input" placeholder="Search username…" />
+              <select id="users-filter-active" class="input">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div id="users-status" class="status"></div>
+            <div class="table-wrap">
+              <table class="table" id="users-table">
+                <thead>
+                  <tr>
+                    <th style="width: 70px">ID</th>
+                    <th>Username</th>
+                    <th style="width: 80px">Active</th>
+                    <th>Roles</th>
+                    <th style="width: 320px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- ROLES -->
+          <section id="view-roles" class="view hidden">
+            <div class="view-header">
+              <h2>Roles</h2>
+              <div class="actions">
+                <button id="btn-role-new" class="btn primary">New Role</button>
+                <button id="btn-roles-refresh" class="btn">Refresh</button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <input id="roles-search" class="input" placeholder="Search roles…" />
+            </div>
+
+            <div id="roles-status" class="status"></div>
+            <div class="split">
+              <div>
+                <div class="table-wrap">
+                  <table class="table" id="roles-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 70px">ID</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th style="width: 140px">Perms</th>
+                        <th style="width: 220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="panel">
+                <h3>Role Permissions</h3>
+                <p class="muted">Select a role to edit its permissions.</p>
+
+                <div id="role-editor" class="hidden">
+                  <div class="row">
+                    <strong id="role-editor-name"></strong>
+                    <div class="actions">
+                      <button id="btn-role-access" class="btn">Manage Access</button>
+                      <button id="btn-role-delete" class="btn danger">Delete Role</button>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <input id="perm-input" class="input" placeholder="e.g., config:read" />
+                    <button id="btn-perm-add" class="btn">Add Permission</button>
+                  </div>
+
+                  <ul id="perm-list" class="chips"></ul>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- PLC BUILDER -->
+          <section id="view-plc" class="view hidden">
+            <div class="view-header">
+              <h2>PLC Builder</h2>
+              <div class="actions">
+                <button id="btn-plc-refresh" class="btn">Refresh</button>
+                <button id="btn-plc-add" class="btn primary">Add PLC</button>
+              </div>
+            </div>
+
+            <div id="plc-status" class="status"></div>
+
+            <div class="split">
+              <div class="panel">
+                <div class="row">
+                  <h3>Tree</h3>
+                  <input id="cfg-search" class="input" placeholder="Filter tree…" />
+                </div>
+                <div id="cfg-tree" class="tree"></div>
+              </div>
+
+              <div class="panel">
+                <div class="row">
+                  <h3>Details</h3>
+                  <div class="actions">
+                    <button id="btn-node-save" class="btn">Save</button>
+                    <button id="btn-node-delete" class="btn danger">Delete</button>
+                  </div>
+                </div>
+                <div id="node-status" class="status"></div>
+                <div id="node-editor" class="muted">Select a node from the tree.</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- DATAPOINT META -->
+          <section id="view-meta" class="view hidden">
+            <div class="view-header">
+              <h2>Datapoint Meta</h2>
+              <div class="actions">
+                <button id="btn-meta-refresh" class="btn">Refresh</button>
+              </div>
+            </div>
+
+            <div class="split">
+              <div class="panel">
+                <div class="row">
+                  <h3>Classes</h3>
+                  <div class="actions">
+                    <button id="btn-dpclass-new" class="btn primary">New</button>
+                    <button id="btn-dpclass-refresh" class="btn">Refresh</button>
+                  </div>
+                </div>
+                <div id="dpclass-status" class="status"></div>
+                <div class="table-wrap">
+                  <table class="table" id="dpclass-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 70px">ID</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th style="width: 220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="row">
+                  <h3>Units</h3>
+                  <div class="actions">
+                    <button id="btn-dpunit-new" class="btn primary">New</button>
+                    <button id="btn-dpunit-refresh" class="btn">Refresh</button>
+                  </div>
+                </div>
+                <div id="dpunit-status" class="status"></div>
+                <div class="table-wrap">
+                  <table class="table" id="dpunit-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 70px">ID</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th style="width: 220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel" style="margin-top: 16px">
+              <div class="row">
+                <h3>Groups</h3>
+                <div class="actions">
+                  <button id="btn-dpgroup-new" class="btn primary">New</button>
+                  <button id="btn-dpgroup-refresh" class="btn">Refresh</button>
+                </div>
+              </div>
+              <div id="dpgroup-status" class="status"></div>
+              <div class="table-wrap">
+                <table class="table" id="dpgroup-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 70px">ID</th>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th style="width: 220px">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- ALARMS -->
+          <section id="view-alarms" class="view hidden">
+            <div class="view-header">
+              <h2>Manage Alarms</h2>
+              <div class="actions">
+                <button id="btn-alarms-refresh" class="btn">Refresh</button>
+                <button id="btn-alarm-rule-new" class="btn primary">Add Rule</button>
+              </div>
+            </div>
+
+            <div class="split">
+              <div class="panel">
+                <h3>Datapoint</h3>
+                <div class="field" style="margin-top: 10px">
+                  <div class="label">Group</div>
+                  <select id="alarms-group-select" class="input"></select>
+                </div>
+                <div class="field" style="margin-top: 10px">
+                  <div class="label">Datapoint</div>
+                  <select id="alarms-datapoint-select" class="input"></select>
+                </div>
+                <div id="alarms-datapoint-info" class="hint muted"></div>
+              </div>
+
+              <div class="panel">
+                <div class="row">
+                  <h3>Rules</h3>
+                </div>
+                <div class="toolbar">
+                  <input id="alarms-search" class="input" placeholder="Filter rules…" />
+                </div>
+
+                <div id="alarms-status" class="status"></div>
+                <div class="table-wrap">
+                  <table class="table" id="alarms-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th style="width: 90px">Severity</th>
+                        <th style="width: 130px">Comparison</th>
+                        <th style="width: 160px">Warning</th>
+                        <th style="width: 160px">Alarm</th>
+                        <th>Schedule</th>
+                        <th style="width: 90px">Enabled</th>
+                        <th style="width: 220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ALARM LOG -->
+          <section id="view-alarm-log" class="view hidden">
+            <div class="view-header">
+              <h2>Alarm Log</h2>
+              <div class="actions">
+                <button id="btn-alarm-log-refresh" class="btn">Refresh</button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <input id="alarm-log-search" class="input" placeholder="Filter message or source…" />
+              <select id="alarm-log-severity" class="input">
+                <option value="">All severities</option>
+                <option value="critical">critical</option>
+                <option value="major">major</option>
+                <option value="minor">minor</option>
+                <option value="info">info</option>
+              </select>
+              <label style="margin-left:8px"><input id="alarm-log-acked" type="checkbox" /> Show only acked</label>
+            </div>
+
+            <div id="alarm-log-status" class="status"></div>
+            <div class="table-wrap">
+              <table class="table" id="alarm-log-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Severity</th>
+                    <th>Message</th>
+                    <th>Source</th>
+                    <th>Acked</th>
+                    <th style="width:160px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- COMMAND LOG -->
+          <section id="view-command-log" class="view hidden">
+            <div class="view-header">
+              <h2>Command Log</h2>
+              <div class="actions">
+                <button id="btn-command-log-refresh" class="btn">Refresh</button>
+              </div>
+            </div>
+
+            <div id="command-log-status" class="status"></div>
+            <div class="table-wrap">
+              <table class="table" id="command-log-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>PLC</th>
+                    <th>Container</th>
+                    <th>Equipment</th>
+                    <th>Data Point</th>
+                    <th>Bit Label</th>
+                    <th>Value</th>
+                    <th>Status</th>
+                    <th>Attempts</th>
+                    <th>User</th>
+                    <th>Client IP</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- ACCESS CONTROL -->
+          <section id="view-access" class="view hidden">
+            <div class="view-header">
+              <h2>Access Control</h2>
+              <div class="actions">
+                <button id="btn-access-refresh" class="btn">Refresh</button>
+                <button id="btn-grants-clear" class="btn danger">Clear Grants</button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <label class="field">
+                <span class="label">Principal Type</span>
+                <select id="principal-type" class="input">
+                  <option value="role">Role</option>
+                  <option value="user">User</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="label">Principal</span>
+                <select id="principal-id" class="input"></select>
+              </label>
+
+              <input id="principal-search" class="input" placeholder="Search principal…" />
+              <input id="access-search" class="input" placeholder="Filter tree…" />
+            </div>
+
+            <div id="access-status" class="status"></div>
+
+            <div class="split">
+              <div class="panel">
+                <h3>PLC Tree Grants</h3>
+                <p class="muted">
+                  Toggles set <strong>explicit</strong> grants. Effective access may also be inherited from ancestors with include_descendants enabled.
+                </p>
+                <div id="access-tree" class="tree"></div>
+              </div>
+
+              <div class="panel">
+                <h3>Explicit Grants</h3>
+                <div id="grants-list" class="list muted">Select a principal to load grants.</div>
+
+                <div class="hr"></div>
+
+                <h3>Access Preview</h3>
+                <div id="access-preview" class="muted">Select a node to see effective access.</div>
+              </div>
+            </div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <dialog id="modal-user" class="modal">
+      <form method="dialog" class="modal-body" id="form-user">
+        <h3 id="modal-user-title">User</h3>
+        <input type="hidden" name="id" />
+
+        <label>
+          Username
+          <input name="username" autocomplete="username" required />
+        </label>
+
+        <label>
+          Password (min 12 chars)
+          <input name="password" type="password" minlength="12" autocomplete="new-password" />
+          <div class="hint muted">Leave blank when editing to keep the current password.</div>
+        </label>
+
+        <label class="row">
+          <span>Active</span>
+          <input name="is_active" type="checkbox" checked />
+        </label>
+
+        <label>
+          Roles
+          <select name="roles" id="user-roles" multiple size="6" class="input"></select>
+          <div id="user-roles-help" class="hint muted"></div>
+        </label>
+
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-user-save" value="default">Save</button>
+        </div>
+
+        <div id="modal-user-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-reset-password" class="modal">
+      <form method="dialog" class="modal-body" id="form-reset-password">
+        <h3>Reset Password</h3>
+        <input type="hidden" name="id" />
+        <div class="hint muted" id="reset-user-label"></div>
+        <label>
+          New password (min 12 chars)
+          <input name="password" type="password" minlength="12" autocomplete="new-password" required />
+        </label>
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-reset-password" value="default">Update</button>
+        </div>
+        <div id="modal-reset-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-role" class="modal">
+      <form method="dialog" class="modal-body" id="form-role">
+        <h3 id="modal-role-title">Role</h3>
+        <input type="hidden" name="id" />
+        <label>
+          Name
+          <input name="name" required />
+        </label>
+        <label>
+          Description
+          <input name="description" placeholder="Optional" />
+        </label>
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-role-save" value="default">Save</button>
+        </div>
+        <div id="modal-role-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-plc" class="modal">
+      <form method="dialog" class="modal-body" id="form-plc">
+        <h3>New PLC</h3>
+        <label>
+          Name
+          <input name="name" required />
+        </label>
+        <label>
+          IP
+          <input name="ip" placeholder="192.168.0.10" required />
+        </label>
+        <label>
+          Port
+          <input name="port" type="number" min="1" max="65535" value="502" required />
+        </label>
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-plc-create" value="default">Create</button>
+        </div>
+        <div id="modal-plc-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-add-child" class="modal">
+      <form method="dialog" class="modal-body" id="form-add-child">
+        <h3 id="child-title">Add</h3>
+        <input type="hidden" name="id" />
+        <input type="hidden" name="parent_type" />
+        <input type="hidden" name="parent_id" />
+        <input type="hidden" name="child_type" />
+
+        <div id="child-fields"></div>
+
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-child-create" value="default">Save</button>
+        </div>
+
+        <div id="modal-child-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-meta-option" class="modal">
+      <form method="dialog" class="modal-body" id="form-meta-option">
+        <h3 id="modal-meta-title">Option</h3>
+        <input type="hidden" name="kind" />
+        <input type="hidden" name="id" />
+
+        <label>
+          Name
+          <input name="name" required />
+        </label>
+
+        <label>
+          Description
+          <input name="description" />
+        </label>
+
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-meta-save" value="default">Save</button>
+        </div>
+
+        <div id="modal-meta-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-alarm-rule" class="modal">
+      <form id="form-alarm-rule" class="modal-body" method="dialog">
+        <h3 id="alarm-rule-modal-title">Alarm Rule</h3>
+        <div id="alarm-rule-status" class="status"></div>
+
+        <div class="field">
+          <div class="label">Datapoint</div>
+          <select id="alarm-rule-datapoint" class="input"></select>
+        </div>
+
+        <div class="field">
+          <div class="label">Name</div>
+          <input id="alarm-rule-name" class="input" placeholder="e.g., High temperature" />
+        </div>
+
+        <div class="row">
+          <label class="inline"><input id="alarm-rule-enabled" type="checkbox" checked /> Enabled</label>
+          <label class="inline"><input id="alarm-rule-warning-enabled" type="checkbox" /> Warning</label>
+          <label class="inline"><input id="alarm-rule-schedule-enabled" type="checkbox" /> Scheduled</label>
+        </div>
+
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <div class="label">Severity</div>
+            <select id="alarm-rule-severity" class="input">
+              <option value="critical">critical</option>
+              <option value="major">major</option>
+              <option value="minor">minor</option>
+              <option value="info" selected>info</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="label">Comparison</div>
+            <select id="alarm-rule-comparison" class="input">
+              <option value="above" selected>above</option>
+              <option value="below">below</option>
+              <option value="outside_range">outside_range</option>
+              <option value="inside_range">inside_range</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="alarm-rule-thresholds-one" class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <div class="label">Warning threshold</div>
+            <input id="alarm-rule-warning-threshold" class="input" type="number" step="any" placeholder="e.g., 75" />
+          </div>
+          <div class="field">
+            <div class="label">Alarm threshold</div>
+            <input id="alarm-rule-alarm-threshold" class="input" type="number" step="any" placeholder="e.g., 80" />
+          </div>
+        </div>
+
+        <div id="alarm-rule-thresholds-range" class="hidden">
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <div class="field">
+              <div class="label">Warning low</div>
+              <input id="alarm-rule-warning-low" class="input" type="number" step="any" placeholder="e.g., 10" />
+            </div>
+            <div class="field">
+              <div class="label">Warning high</div>
+              <input id="alarm-rule-warning-high" class="input" type="number" step="any" placeholder="e.g., 20" />
+            </div>
+          </div>
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <div class="field">
+              <div class="label">Alarm low</div>
+              <input id="alarm-rule-alarm-low" class="input" type="number" step="any" placeholder="e.g., 5" />
+            </div>
+            <div class="field">
+              <div class="label">Alarm high</div>
+              <input id="alarm-rule-alarm-high" class="input" type="number" step="any" placeholder="e.g., 25" />
+            </div>
+          </div>
+        </div>
+
+        <div id="alarm-rule-schedule" class="hidden">
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <div class="field">
+              <div class="label">Start time</div>
+              <input id="alarm-rule-start" class="input" type="time" />
+            </div>
+            <div class="field">
+              <div class="label">End time</div>
+              <input id="alarm-rule-end" class="input" type="time" />
+            </div>
+          </div>
+          <div class="field">
+            <div class="label">Timezone (optional)</div>
+            <input id="alarm-rule-tz" class="input" placeholder="e.g., UTC" />
+            <div class="hint muted">Cross-midnight windows are supported (e.g., 22:00–06:00).</div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div class="row right">
+          <button type="button" id="btn-alarm-rule-cancel" class="btn">Cancel</button>
+          <button type="submit" id="btn-alarm-rule-save" class="btn primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/scripts/admin.js?v=20260221"></script>
+  </body>
+</html>

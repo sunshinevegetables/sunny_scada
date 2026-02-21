@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -90,6 +94,39 @@ class RefreshToken(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped[User] = relationship("User", lazy="selectin")
+
+
+class AppClient(Base):
+    """Service-to-service application client credentials.
+
+    This enables non-interactive authentication via OAuth2 client-credentials style flow
+    (POST /oauth/token). Clients are bound to a Role so they can reuse existing RBAC +
+    System Config ACL (role grants).
+    """
+
+    __tablename__ = "app_clients"
+
+    # Use UUID4 hex (32 chars) so it's easy to copy/paste and URL-safe.
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: uuid.uuid4().hex)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+
+    role_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roles.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Argon2 hash of the client secret (never store raw secret)
+    secret_hash: Mapped[str] = mapped_column(String(500))
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Optional IP allowlist (CIDR strings). Empty means allow from anywhere.
+    allowed_ips: Mapped[List[str]] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    role: Mapped[Optional[Role]] = relationship("Role", lazy="selectin")
 
 
 class AuditLog(Base):
@@ -222,7 +259,153 @@ class Alarm(Base):
     acked_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     acked_by_client_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
-    acked_by: Mapped[Optional[User]] = relationship("User", lazy="selectin")
+
+# -----------------
+# Unified alarm management (PLC + backend rules + frontend-origin alarms)
+# -----------------
+
+
+class AlarmOccurrence(Base):
+    """Current state of an alarm keyed by (source,key).
+
+    This table represents the *latest* state of an alarm and is used for
+    restart-safe snapshots and acknowledgement tracking.
+    """
+
+    __tablename__ = "alarm_occurrences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # plc|backend_rule|frontend_rule
+    source: Mapped[str] = mapped_column(String(40), index=True)
+    # stable dedupe key within source
+    key: Mapped[str] = mapped_column(String(500), index=True)
+
+    datapoint_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rule_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("alarm_rules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    external_rule_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+
+    # OK|WARNING|ALARM
+    state: Mapped[str] = mapped_column(String(20), index=True, default="OK")
+    severity: Mapped[str] = mapped_column(String(30), index=True, default="info")
+    message: Mapped[str] = mapped_column(String(500), default="")
+    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    warning_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alarm_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    first_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    last_seen_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    cleared_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    acknowledged_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_by_client_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("source", "key", name="uq_alarm_occ_source_key"),
+        CheckConstraint("state IN ('OK','WARNING','ALARM')", name="ck_alarm_occ_state"),
+        Index("ix_alarm_occ_src_state", "source", "state"),
+    )
+
+
+class AlarmEvent(Base):
+    """Immutable state-change event for an alarm occurrence."""
+
+    __tablename__ = "alarm_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    occurrence_id: Mapped[int] = mapped_column(ForeignKey("alarm_occurrences.id", ondelete="CASCADE"), index=True)
+
+    ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    source: Mapped[str] = mapped_column(String(40), index=True)
+    key: Mapped[str] = mapped_column(String(500), index=True)
+
+    datapoint_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rule_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("alarm_rules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    external_rule_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+
+    prev_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    new_state: Mapped[str] = mapped_column(String(20), index=True)
+
+    severity: Mapped[str] = mapped_column(String(30), index=True, default="info")
+    message: Mapped[str] = mapped_column(String(500), default="")
+    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        CheckConstraint("new_state IN ('OK','WARNING','ALARM')", name="ck_alarm_evt_new_state"),
+        Index("ix_alarm_evt_src_ts", "source", "ts"),
+    )
+
+
+class AlarmRule(Base):
+    """User-managed alarm rules for datapoints.
+
+    These rules can be:
+      - backend rules (created in Admin Panel)
+      - frontend-origin rules (synced or referenced by external_rule_id)
+    """
+
+    __tablename__ = "alarm_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    datapoint_id: Mapped[int] = mapped_column(ForeignKey("cfg_data_points.id", ondelete="CASCADE"), index=True)
+    rule_source: Mapped[str] = mapped_column(String(20), default="backend", index=True)  # backend|frontend
+    external_rule_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, index=True)
+
+    name: Mapped[str] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    severity: Mapped[str] = mapped_column(String(30), default="info", index=True)
+    comparison: Mapped[str] = mapped_column(String(30), default="above", index=True)  # above|below|outside_range|inside_range
+
+    warning_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    warning_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alarm_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # For range comparisons
+    warning_threshold_low: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    warning_threshold_high: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alarm_threshold_low: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alarm_threshold_high: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    schedule_start_time: Mapped[Optional[dt.time]] = mapped_column(Time, nullable=True)
+    schedule_end_time: Mapped[Optional[dt.time]] = mapped_column(Time, nullable=True)
+    schedule_timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("rule_source IN ('backend','frontend')", name="ck_alarm_rule_source"),
+        CheckConstraint(
+            "comparison IN ('above','below','outside_range','inside_range')",
+            name="ck_alarm_rule_comparison",
+        ),
+        Index("ix_alarm_rules_dp", "datapoint_id"),
+    )
+
+    datapoint: Mapped["CfgDataPoint"] = relationship("CfgDataPoint", lazy="selectin")
 
 
 # -------- Maintenance (CMMS-lite) --------
@@ -441,6 +624,10 @@ class CfgContainer(Base):
 
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(200))
+    # Optional datapoint group that applies to datapoints under this container
+    group_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -455,6 +642,8 @@ class CfgContainer(Base):
         lazy="selectin",
     )
 
+    container_group: Mapped[Optional[CfgDataPointGroup]] = relationship("CfgDataPointGroup", lazy="selectin")
+
     __table_args__ = (
         UniqueConstraint("plc_id", "name", name="uq_cfg_container_plc_name"),
     )
@@ -468,6 +657,10 @@ class CfgEquipment(Base):
 
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(200))
+    # Optional datapoint group that applies to datapoints under this equipment
+    group_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -476,9 +669,50 @@ class CfgEquipment(Base):
 
     container: Mapped[CfgContainer] = relationship("CfgContainer", back_populates="equipment", lazy="selectin")
 
+    equipment_group: Mapped[Optional[CfgDataPointGroup]] = relationship("CfgDataPointGroup", lazy="selectin")
+
     __table_args__ = (
         UniqueConstraint("container_id", "name", name="uq_cfg_equipment_container_name"),
     )
+
+
+class CfgDataPointClass(Base):
+    __tablename__ = "cfg_data_point_classes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class CfgDataPointUnit(Base):
+    __tablename__ = "cfg_data_point_units"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class CfgDataPointGroup(Base):
+    __tablename__ = "cfg_data_point_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class CfgDataPoint(Base):
@@ -496,6 +730,18 @@ class CfgDataPoint(Base):
     type: Mapped[str] = mapped_column(String(20), index=True)  # INTEGER|DIGITAL|REAL
     address: Mapped[str] = mapped_column(String(200))
 
+    # Optional datapoint metadata (configured via Admin Panel / System Config)
+    group_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    class_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_classes.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_units.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -507,6 +753,10 @@ class CfgDataPoint(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    dp_group: Mapped[Optional[CfgDataPointGroup]] = relationship("CfgDataPointGroup", lazy="selectin")
+    dp_class: Mapped[Optional[CfgDataPointClass]] = relationship("CfgDataPointClass", lazy="selectin")
+    dp_unit: Mapped[Optional[CfgDataPointUnit]] = relationship("CfgDataPointUnit", lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("owner_type", "owner_id", "label", name="uq_cfg_dp_owner_label"),
@@ -520,9 +770,72 @@ class CfgDataPointBit(Base):
     data_point_id: Mapped[int] = mapped_column(ForeignKey("cfg_data_points.id", ondelete="CASCADE"), index=True)
     bit: Mapped[int] = mapped_column(Integer)
     label: Mapped[str] = mapped_column(String(200))
+    bit_class: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     data_point: Mapped[CfgDataPoint] = relationship("CfgDataPoint", back_populates="bits", lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("data_point_id", "bit", name="uq_cfg_dp_bit"),
+    )
+
+
+class CfgAccessGrant(Base):
+    """Access control grants for the DB-backed system configuration tree.
+
+    A grant is assigned to exactly one principal (role OR user) and targets a resource
+    (PLC/Container/Equipment/DataPoint).
+
+    Semantics:
+      - access_level: "read" or "write" (write implies read)
+      - include_descendants: when True on plc/container/equipment, access is inherited
+        by descendant objects.
+    """
+
+    __tablename__ = "cfg_access_grants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # principal (exactly one must be set)
+    role_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # resource
+    resource_type: Mapped[str] = mapped_column(String(30))  # plc|container|equipment|datapoint
+    resource_id: Mapped[int] = mapped_column(Integer)
+
+    access_level: Mapped[str] = mapped_column(String(10), default="read")  # read|write
+    include_descendants: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        # Exactly one principal.
+        CheckConstraint(
+            "(role_id IS NOT NULL AND user_id IS NULL) OR (role_id IS NULL AND user_id IS NOT NULL)",
+            name="ck_cfg_access_grants_principal",
+        ),
+        CheckConstraint(
+            "resource_type IN ('plc','container','equipment','datapoint')",
+            name="ck_cfg_access_grants_resource_type",
+        ),
+        CheckConstraint(
+            "access_level IN ('read','write')",
+            name="ck_cfg_access_grants_access_level",
+        ),
+        # Ensure one grant per principal per resource.
+        UniqueConstraint("role_id", "resource_type", "resource_id", name="uq_cfg_access_grants_role_resource"),
+        UniqueConstraint("user_id", "resource_type", "resource_id", name="uq_cfg_access_grants_user_resource"),
+        Index("ix_cfg_access_grants_resource", "resource_type", "resource_id"),
     )

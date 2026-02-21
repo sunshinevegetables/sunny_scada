@@ -1,5 +1,9 @@
 import json
 import yaml
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # Input and output file paths
 input_file = "data.json"
@@ -25,13 +29,13 @@ try:
     with open(output_file, "w") as file:
         yaml.dump({"data_points": filtered_data}, file, default_flow_style=False)
 
-    print(f"Generated {output_file} with Modbus addresses returning non-zero values.")
+    logger.info("Generated %s with Modbus addresses returning non-zero values.", output_file)
 
 except FileNotFoundError:
-    print(f"Error: {input_file} does not exist.")
+    logger.error("Error: %s does not exist.", input_file)
 except ValueError as ve:
-    print(f"Value Error: {ve}")
+    logger.error("Value Error: %s", ve)
 except json.JSONDecodeError as je:
-    print(f"JSON Decode Error: {je}")
+    logger.error("JSON Decode Error: %s", je)
 except Exception as e:
-    print(f"An unexpected error occurred: {e}")
+    logger.exception("An unexpected error occurred: %s", e)

@@ -4,8 +4,8 @@
 - FastAPI app (`main.py` → `sunny_scada/api/app.py`) serves REST APIs and static frontend.
 - PLC reads: `PollingService` calls `PLCReader` which uses `ModbusService` (pymodbus) and stores latest values in `DataStorage`.
 - Existing `/plc_data` endpoint returns the current `DataStorage` snapshot (unchanged).
-- PLC writes: new command pipeline (`/commands`) validates writes against `data_points.yaml` and executes asynchronously per-PLC.
-- `data_points.yaml` is edited via config-admin APIs using ruamel.yaml round-trip + file-lock + atomic writes.
+- PLC writes: new command pipeline (`/commands`) validates writes against the database and executes asynchronously per-PLC.
+- Write datapoints are fully managed in the database (no YAML dependency for writes).
 - Auth: JWT access tokens + refresh tokens (DB) with Argon2 password hashing + lockout.
 - RBAC: roles/permissions with wildcard expansion (e.g., `alarms:*`).
 - Persistence: SQLAlchemy ORM; Alembic migrations in `alembic/`.
@@ -16,7 +16,7 @@
 
 ## Implementation notes / key decisions
 - Kept the existing polling/reader/storage architecture and preserved `/plc_data` response shape.
-- Implemented “write safety” by mapping all writes to configured `write:` datapoints in `data_points.yaml` only; no arbitrary register/address writes.
+- Implemented "write safety" by mapping all writes to configured `write` datapoints in the database only; no arbitrary register/address writes.
 - Implemented per-PLC serialized write execution using a per-PLC queue + worker thread (non-blocking HTTP).
 - Implemented process-local rate limiting (safe default). For multi-instance deployments, swap to Redis.
 - Used ruamel.yaml + portalocker + atomic temp-file rename for safe YAML round-trip edits.

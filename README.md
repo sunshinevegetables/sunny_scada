@@ -34,6 +34,52 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 Then open: `http://localhost:8000/`
 
+## Security / Authentication (default-deny)
+
+This backend is **default-deny**: every non-allowlisted route requires `Authorization: Bearer <access_token>`.
+
+Anonymous routes are intentionally minimal:
+- UI/static assets (`/`, `/admin-panel*`, `/static*`, legacy mounts)
+- Auth/token issuance: `/auth/login`, `/auth/refresh`, `/oauth/token`
+- Health: `/health`
+
+Swagger docs are only exposed when `ENV=dev` (or `development/local`).
+
+### User login (interactive)
+
+```bash
+curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"..."}'
+
+# Call a protected endpoint
+curl -s http://localhost:8000/plc_data \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### App clients (service-to-service, client credentials)
+
+Create an app client from an admin user (returns the secret **once**):
+
+```bash
+curl -s -X POST http://localhost:8000/admin/app-clients \
+  -H "Authorization: Bearer <admin_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"grafana","role":"admin","allowed_ips":["10.0.0.0/8"]}'
+```
+
+Request a short-lived access token (no refresh token; re-issue as needed):
+
+```bash
+curl -s -X POST http://localhost:8000/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -u "<client_id>:<client_secret>" \
+  -d "grant_type=client_credentials"
+
+curl -s http://localhost:8000/plc_data \
+  -H "Authorization: Bearer <app_access_token>"
+```
+
 ## Environment variables
 
 | Variable | Default | Meaning |
@@ -48,8 +94,37 @@ Then open: `http://localhost:8000/`
 | `DATABASE_URL` | `sqlite:///./sunny_scada.db` | SQLAlchemy database URL |
 | `AUTO_CREATE_DB` | `0` | dev/test escape hatch to create tables without Alembic |
 | `JWT_SECRET_KEY` | **required** | JWT signing secret (do not commit) |
+| `ENV` | `prod` | environment mode (`dev` enables Swagger docs) |
+| `AUTH_ENABLED` | `1` | set to `0` to disable auth (dev/test only) |
+| `JWT_ISSUER` | `sunny_scada` | JWT issuer (`iss`) |
+| `JWT_AUDIENCE` | *(empty)* | optional JWT audience (`aud`) |
+| `JWT_LEEWAY_S` | `30` | JWT clock skew leeway (seconds) |
+| `ACCESS_TOKEN_TTL_S` | `900` | user access token TTL (seconds) |
+| `APP_ACCESS_TOKEN_TTL_S` | `3600` | app client access token TTL (seconds) |
+| `REFRESH_TOKEN_TTL_S` | `604800` | refresh token TTL (seconds) |
+| `TRUSTED_PROXIES` | *(empty)* | IP/CIDR list of trusted proxies that can set X-Forwarded-Proto |
 | `INITIAL_ADMIN_PASSWORD` | **required on first run** | bootstrap admin user password |
 | `DIGITAL_BIT_MAX` | `15` | max bit index allowed for DIGITAL datapoint bit labels |
+
+Example `.env`:
+
+```bash
+ENV=prod
+AUTH_ENABLED=1
+JWT_SECRET_KEY=sunshinevegetables
+JWT_ISSUER=sunny_scada
+
+# Optional hardening
+JWT_AUDIENCE=sunny_scada_api
+TRUSTED_PROXIES=10.0.0.0/8,127.0.0.1
+
+# Token TTLs (seconds)
+ACCESS_TOKEN_TTL_S=900
+APP_ACCESS_TOKEN_TTL_S=3600
+REFRESH_TOKEN_TTL_S=604800
+
+INITIAL_ADMIN_PASSWORD=admin
+```
 
 ## System config module (DB-backed)
 

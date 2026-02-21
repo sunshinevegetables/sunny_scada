@@ -204,12 +204,6 @@ class PLCReader:
 
     def _decode_tag(self, tag: TagSpec, reg_map: Dict[int, int]) -> Optional[Dict[str, Any]]:
         d = tag.details
-        monitor = d.get("monitor")
-        process = d.get("process")
-        min_value = d.get("min")
-        min_audio = d.get("min_audio")
-        max_value = d.get("max")
-        max_audio = d.get("max_audio")
 
         if tag.typ == "INTEGER":
             v = reg_map.get(tag.read_addr)
@@ -219,12 +213,6 @@ class PLCReader:
                 "description": tag.description,
                 "type": "INTEGER",
                 "value": int(v),
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": tag.base_addr,
             }
 
@@ -246,12 +234,6 @@ class PLCReader:
                 "type": "REAL",
                 "raw_value": raw_value,
                 "scaled_value": scaled_value,
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": tag.base_addr,
                 "high_register": int(hi),
                 "low_register": int(lo),
@@ -275,12 +257,6 @@ class PLCReader:
                 "description": tag.description,
                 "type": "DIGITAL",
                 "value": bit_statuses,
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": tag.base_addr,
             }
 
@@ -361,12 +337,6 @@ class PLCReader:
             return None
 
         base_addr = address_4x_to_pymodbus(int(address_4x))
-        monitor = point_details.get("monitor")
-        process = point_details.get("process")
-        min_value = point_details.get("min")
-        min_audio = point_details.get("min_audio")
-        max_value = point_details.get("max")
-        max_audio = point_details.get("max_audio")
 
         if data_type == "INTEGER":
             regs = self.modbus.read_holding_registers(plc_name, base_addr, 1)
@@ -376,12 +346,6 @@ class PLCReader:
                 "description": description,
                 "type": "INTEGER",
                 "value": int(regs[0]),
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": base_addr,
             }
 
@@ -403,12 +367,6 @@ class PLCReader:
                 "type": "REAL",
                 "raw_value": raw_value,
                 "scaled_value": scaled_value,
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": base_addr,
                 "high_register": int(regs[0]),
                 "low_register": int(regs[1]),
@@ -430,12 +388,6 @@ class PLCReader:
                 "description": description,
                 "type": "DIGITAL",
                 "value": bit_statuses,
-                "monitor": monitor,
-                "process": process,
-                "min": min_value,
-                "max": max_value,
-                "max_audio": max_audio,
-                "min_audio": min_audio,
                 "register_address": base_addr,
             }
 

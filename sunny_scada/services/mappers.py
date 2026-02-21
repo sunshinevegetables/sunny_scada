@@ -45,12 +45,6 @@ def map_temperature_points(storage_data: Dict[str, Any], process_name: str) -> D
                             "type": value.get("type"),
                             "raw_value": value.get("raw_value"),
                             "scaled_value": value.get("scaled_value"),
-                            "monitor": monitor,
-                            "process": process,
-                            "max": value.get("max"),
-                            "min": value.get("min"),
-                            "max_audio": value.get("max_audio"),
-                            "min_audio": value.get("min_audio"),
                         }
     return out
 
@@ -92,12 +86,6 @@ def map_monitored_data(storage_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]
                             "type": value.get("type"),
                             "raw_value": value.get("raw_value"),
                             "scaled_value": value.get("scaled_value"),
-                            "monitor": monitor,
-                            "process": process,
-                            "max": value.get("max"),
-                            "min": value.get("min"),
-                            "max_audio": value.get("max_audio"),
-                            "min_audio": value.get("min_audio"),
                         }
     return out
 

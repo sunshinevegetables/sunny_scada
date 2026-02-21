@@ -27,3 +27,8 @@ build/
 *.rej
 *.swo
 *.out
+*.db-shm
+*.db-wal
+*.coverage
+.pytest_cache/      
+*.zip

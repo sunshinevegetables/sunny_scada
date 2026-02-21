@@ -8,10 +8,11 @@ from sunny_scada.api.deps import (
     get_data_points_service,
     get_config_service,
     get_db,
-    get_current_user,
+    get_current_principal,
     require_permission,
     get_audit_service,
 )
+from sunny_scada.api.security import Principal
 from sunny_scada.api.schemas import UpdateDataPointRequest
 from sunny_scada.services.data_points_service import DataPointsService
 from sunny_scada.services.config_service import ConfigService
@@ -22,7 +23,11 @@ router = APIRouter(tags=["data-points"])
 
 
 @router.get("/get_data_point", summary="Get Data Point", description="Fetch a specific data point from the data_points.yaml file.")
-def get_data_point(path: str, svc: DataPointsService = Depends(get_data_points_service)):
+def get_data_point(
+    path: str,
+    svc: DataPointsService = Depends(get_data_points_service),
+    _perm=Depends(require_permission("config:read")),
+):
     data = svc.get_by_path(path)
     if data is None:
         raise HTTPException(status_code=404, detail="Data point not found.")
@@ -36,7 +41,7 @@ def update_data_point(
     config: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
-    user=Depends(get_current_user),
+    principal: Principal = Depends(get_current_principal),
     _perm=Depends(require_permission("config:write")),
 ):
     # Backward compatible behavior, but now with file lock + atomic write.
@@ -57,7 +62,7 @@ def update_data_point(
         before_yaml=before,
         after_yaml=after,
         diff=diff,
-        user_id=user.id,
+        user_id=principal.user.id if principal.user else None,
         client_ip=request.client.host if request.client else None,
     )
     db.add(rev)
@@ -66,10 +71,10 @@ def update_data_point(
     audit.log(
         db,
         action="config.legacy_update_data_point",
-        user_id=user.id,
+        user_id=principal.user.id if principal.user else None,
         client_ip=request.client.host if request.client else None,
         resource=req.name,
-        metadata={"path": req.path, "revision_id": rev.id},
+        metadata={"actor": principal.actor_key, "path": req.path, "revision_id": rev.id},
         config_revision_id=rev.id,
     )
     return {"message": f"Data point '{req.name}' updated successfully at {req.path}.", "revision_id": rev.id}
@@ -82,7 +87,7 @@ def add_data_point(
     config: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
     audit: AuditService = Depends(get_audit_service),
-    user=Depends(get_current_user),
+    principal: Principal = Depends(get_current_principal),
     _perm=Depends(require_permission("config:write")),
 ):
     value = {
@@ -102,7 +107,7 @@ def add_data_point(
         before_yaml=before,
         after_yaml=after,
         diff=diff,
-        user_id=user.id,
+        user_id=principal.user.id if principal.user else None,
         client_ip=request.client.host if request.client else None,
     )
     db.add(rev)
@@ -111,10 +116,10 @@ def add_data_point(
     audit.log(
         db,
         action="config.legacy_add_data_point",
-        user_id=user.id,
+        user_id=principal.user.id if principal.user else None,
         client_ip=request.client.host if request.client else None,
         resource=req.name,
-        metadata={"parent_path": req.path, "revision_id": rev.id},
+        metadata={"actor": principal.actor_key, "parent_path": req.path, "revision_id": rev.id},
         config_revision_id=rev.id,
     )
     return {"message": f"Data point '{req.name}' added successfully to {req.path}.", "revision_id": rev.id}

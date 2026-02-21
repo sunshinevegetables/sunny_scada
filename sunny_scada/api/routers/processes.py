@@ -5,13 +5,17 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 
 from sunny_scada.api.deps import get_settings
+from sunny_scada.api.deps import require_permission
 from sunny_scada.core.settings import Settings
 
 router = APIRouter(tags=["processes"])
 
 
 @router.get("/processes", summary="Get Configured Processes", description="Fetch the list of all configured processes.")
-def get_processes(settings: Settings = Depends(get_settings)):
+def get_processes(
+    settings: Settings = Depends(get_settings),
+    _perm=Depends(require_permission("config:read")),
+):
     path = settings.processes_file
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Processes configuration file not found.")

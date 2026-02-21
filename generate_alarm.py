@@ -1,4 +1,8 @@
 import pyttsx3
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # Text to be converted into speech
 text = "ALERT! SUCTION PRESSURE IS HIGHER THAN THRESHOLD. IT IS SUGGESTED TO TURN ON THE COMPRESSOR TO BRING DOWN THE SUCTION PRESSURE."
@@ -17,4 +21,4 @@ engine.save_to_file(text, filename)
 # Process the speech synthesis
 engine.runAndWait()
 
-print(f"Alarm sound saved as {filename}")
+logger.info("Alarm sound saved as %s", filename)

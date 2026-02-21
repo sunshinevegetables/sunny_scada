@@ -7,12 +7,12 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from sunny_scada.db.models import Command, CommandEvent
+from sunny_scada.db.models import Command, CommandEvent, CfgDataPoint
 from sunny_scada.modbus_service import ModbusService
 from sunny_scada.services.audit_service import AuditService
-from sunny_scada.services.data_points_service import DataPointsService
 from sunny_scada.services.rate_limiter import RateLimiter
 from sunny_scada.services.command_executor import CommandExecutor
+from sunny_scada.services.command_log_payload import build_command_log_payload
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +28,26 @@ class CommandService:
         self,
         *,
         modbus: ModbusService,
-        data_points: DataPointsService,
         executor: CommandExecutor,
         rate_limiter: RateLimiter,
         audit: AuditService,
+        broadcaster=None,
         rate_limit_per_minute: int = 30,
     ) -> None:
         self._modbus = modbus
-        self._dp = data_points
         self._executor = executor
         self._limiter = rate_limiter
         self._audit = audit
+        self._broadcaster = broadcaster
         self._rpm = max(1, int(rate_limit_per_minute))
+
+    def _emit(self, payload: dict) -> None:
+        if not self._broadcaster:
+            return
+        try:
+            self._broadcaster(payload)
+        except Exception:
+            logger.debug("CommandService broadcast failed", exc_info=True)
 
     def create(
         self,
@@ -66,22 +74,44 @@ class CommandService:
         if not limit.allowed:
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-        dp = self._dp.find_register(datapoint_id, direction="write")
-        if not dp:
-            raise HTTPException(status_code=400, detail=f"Datapoint '{datapoint_id}' is not configured as writable")
-
-        addr = dp.get("address")
-        if addr is None:
-            raise HTTPException(status_code=400, detail="Writable datapoint missing 'address'")
+        # DB-backed datapoints only (format: db-dp:123)
+        if not datapoint_id.startswith("db-dp:"):
+            raise HTTPException(status_code=400, detail="Only DB-backed datapoints are supported (format: db-dp:ID)")
+        
         try:
-            addr_i = int(addr)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid address")
+            dp_db_id = int(datapoint_id.split(":", 1)[1])
+        except (IndexError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid DB datapoint ID format")
+        
+        db_dp = db.query(CfgDataPoint).filter(CfgDataPoint.id == dp_db_id).one_or_none()
+        if not db_dp or db_dp.category != "write":
+            raise HTTPException(status_code=400, detail=f"Datapoint '{datapoint_id}' is not configured as writable")
+        
+        # Extract address and type from DB
+        try:
+            addr_i = int(db_dp.address)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid address format in DB: {db_dp.address}")
+        
         if addr_i < 40000:
             raise HTTPException(status_code=400, detail="Write address must be a 4xxxx holding register")
+        
+        typ = db_dp.type.upper()
+        allowed_bits = {b.bit for b in db_dp.bits} if db_dp.bits else set()
 
-        typ = str(dp.get("type") or "").upper()
-        payload: Dict[str, Any] = {"address": addr_i}
+        # Resolve equipment/container label for logging
+        equipment_label = "Unknown"
+        if db_dp.owner_type and db_dp.owner_id:
+            if db_dp.owner_type == "equipment":
+                from sunny_scada.db.models import CfgEquipment
+                eq = db.query(CfgEquipment).filter(CfgEquipment.id == db_dp.owner_id).one_or_none()
+                equipment_label = eq.label if eq else "Unknown"
+            elif db_dp.owner_type == "container":
+                from sunny_scada.db.models import CfgContainer
+                ct = db.query(CfgContainer).filter(CfgContainer.id == db_dp.owner_id).one_or_none()
+                equipment_label = ct.label if ct else "Unknown"
+
+        payload: Dict[str, Any] = {"address": addr_i, "datapoint_label": db_dp.label, "equipment_label": equipment_label}
 
         if typ == "DIGITAL":
             if kind not in ("bit", ""):
@@ -92,11 +122,20 @@ class CommandService:
                 raise HTTPException(status_code=400, detail="bit must be 0..15")
             if int(value) not in (0, 1):
                 raise HTTPException(status_code=400, detail="value must be 0 or 1")
-            # enforce configured bit presence if bits mapping exists
-            bits = dp.get("bits") or {}
-            if isinstance(bits, dict) and bits and f"BIT {int(bit)}" not in bits:
-                raise HTTPException(status_code=400, detail="bit not permitted for this datapoint")
-            payload.update({"bit": int(bit), "value": int(value)})
+            
+            # Enforce bit presence in DB
+            if allowed_bits and int(bit) not in allowed_bits:
+                raise HTTPException(status_code=400, detail=f"bit not permitted for this datapoint (allowed: {sorted(allowed_bits)})")
+            
+            # Extract bit label from database
+            bit_label = "Unknown"
+            if db_dp.bits:
+                for b in db_dp.bits:
+                    if b.bit == int(bit):
+                        bit_label = b.label or f"Bit {int(bit)}"
+                        break
+            
+            payload.update({"bit": int(bit), "bit_label": bit_label, "value": int(value)})
             kind = "bit"
 
         elif typ == "INTEGER":
@@ -108,16 +147,14 @@ class CommandService:
                 v = int(value)
             except Exception:
                 raise HTTPException(status_code=400, detail="value must be an integer")
-            if "min" in dp and dp.get("min") is not None and v < int(dp.get("min")):
-                raise HTTPException(status_code=400, detail="value below min")
-            if "max" in dp and dp.get("max") is not None and v > int(dp.get("max")):
-                raise HTTPException(status_code=400, detail="value above max")
+            
             if v < 0 or v > 65535:
                 raise HTTPException(status_code=400, detail="value out of 0..65535")
             payload.update({"value": v, "verify": True})
 
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported writable type '{typ}'")
+
 
         cmd = Command(
             plc_name=plc_name,
@@ -130,8 +167,12 @@ class CommandService:
         )
         db.add(cmd)
         db.flush()  # cmd.id
-        db.add(CommandEvent(command_row_id=cmd.id, status="queued", message=None, meta={"rate_remaining": limit.remaining}))
+        evt = CommandEvent(command_row_id=cmd.id, status="queued", message=None, meta={"rate_remaining": limit.remaining})
+        db.add(evt)
         db.commit()
+        db.refresh(cmd)
+        db.refresh(evt)
+        self._emit(build_command_log_payload(cmd, evt))
 
         # audit trail
         try:

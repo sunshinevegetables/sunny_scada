@@ -1,0 +1,32 @@
+* text=auto
+
+# Enforce LF for source and config files
+*.py text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.sql text eol=lf
+
+# Windows-native scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary artifacts
+*.db binary
+*.sqlite3 binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

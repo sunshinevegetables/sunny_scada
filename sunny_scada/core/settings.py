@@ -3,7 +3,15 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+env_file = Path(__file__).parent.parent.parent / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
 
 
 def _env_bool(key: str, default: str = "1") -> bool:
@@ -44,6 +52,11 @@ def _env_list(key: str, default: str = "") -> List[str]:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    # Environment
+    env: str = field(
+        default_factory=lambda: (os.getenv("ENV", os.getenv("APP_ENV", "prod")) or "prod").strip()
+    )
+
     # Files/dirs (relative to repo root unless absolute)
     plc_config_file: str = field(default_factory=lambda: os.getenv("PLC_CONFIG_FILE", "config/config.yaml"))
     data_points_file: str = field(default_factory=lambda: os.getenv("DATA_POINTS_FILE", "config/data_points.yaml"))
@@ -99,7 +112,10 @@ class Settings:
     auth_enabled: bool = field(default_factory=lambda: _env_bool("AUTH_ENABLED", "1"))
     jwt_secret_key: str = field(default_factory=lambda: os.getenv("JWT_SECRET_KEY", "").strip())
     jwt_issuer: str = field(default_factory=lambda: os.getenv("JWT_ISSUER", "sunny_scada").strip())
+    jwt_audience: str = field(default_factory=lambda: os.getenv("JWT_AUDIENCE", "").strip())
+    jwt_leeway_s: int = field(default_factory=lambda: _env_int("JWT_LEEWAY_S", "30"))
     access_token_ttl_s: int = field(default_factory=lambda: _env_int("ACCESS_TOKEN_TTL_S", "900"))
+    app_access_token_ttl_s: int = field(default_factory=lambda: _env_int("APP_ACCESS_TOKEN_TTL_S", "3600"))
     refresh_token_ttl_s: int = field(default_factory=lambda: _env_int("REFRESH_TOKEN_TTL_S", str(60 * 60 * 24 * 7)))
     auth_lockout_threshold: int = field(default_factory=lambda: _env_int("AUTH_LOCKOUT_THRESHOLD", "5"))
     auth_lockout_duration_s: int = field(default_factory=lambda: _env_int("AUTH_LOCKOUT_DURATION_S", "900"))
@@ -113,6 +129,10 @@ class Settings:
 
     # Request limits / hardening
     max_request_size_bytes: int = field(default_factory=lambda: _env_int("MAX_REQUEST_SIZE_BYTES", str(1024 * 1024)))
+
+    # Reverse proxy / perimeter
+    # List of trusted proxy IPs/CIDRs (e.g., ["127.0.0.1", "10.0.0.0/8"]).
+    trusted_proxies: List[str] = field(default_factory=lambda: _env_list("TRUSTED_PROXIES", ""))
 
     # Background scheduler (retention, historian, maintenance schedules).
     enable_scheduler: bool = field(default_factory=lambda: _env_bool("ENABLE_SCHEDULER", "1"))
