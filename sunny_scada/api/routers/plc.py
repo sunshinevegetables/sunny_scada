@@ -83,6 +83,9 @@ def _collect_leaf_indexes(storage_tree: Any) -> tuple[Dict[str, Dict[str, Any]],
         for k, v in node.items():
             if _is_leaf(v):
                 by_label.setdefault(str(k), v)
+                payload_label = v.get("label")
+                if payload_label:
+                    by_label.setdefault(str(payload_label), v)
                 try:
                     ra = v.get("register_address")
                     if ra is not None:

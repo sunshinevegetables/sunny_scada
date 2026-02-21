@@ -6,6 +6,7 @@ import time
 from typing import Optional
 
 from sunny_scada.plc_reader import PLCReader
+from sunny_scada.services.datapoint_identity import make_canonical_datapoint_key
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,7 @@ class PollingService:
                     batch_results = {}
                     storage_results = {}  # Separate format for DataStorage
                     for dp in points:
+                        canonical_key = make_canonical_datapoint_key(int(dp.id))
                         point_details = {
                             "address": dp.address,
                             "type": dp.type,
@@ -136,7 +138,7 @@ class PollingService:
                         result = self._reader.read_data_point(plc_name, dp.label, point_details)
                         if result is not None:
                             # Use the same structure as DB
-                            batch_results[dp.label] = {
+                            batch_results[canonical_key] = {
                                 "id": dp.id,
                                 "owner_type": dp.owner_type,
                                 "owner_id": dp.owner_id,
@@ -155,7 +157,13 @@ class PollingService:
                                 "timestamp": result.get("timestamp"),
                             }
                             # Store in format compatible with plc_data endpoint
-                            storage_results[dp.label] = result
+                            storage_results[canonical_key] = {
+                                **result,
+                                "id": dp.id,
+                                "label": dp.label,
+                                "owner_type": dp.owner_type,
+                                "owner_id": dp.owner_id,
+                            }
                     db_data.append({"plc_name": plc_name, "data_points": batch_results})
                     
                     # Store the polled data in DataStorage for plc_data endpoint

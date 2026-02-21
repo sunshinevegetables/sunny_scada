@@ -565,10 +565,18 @@ class HistorianSample(Base):
     ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     plc_id: Mapped[str] = mapped_column(String(200), index=True)
+    cfg_data_point_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_points.id", ondelete="SET NULL"), nullable=True
+    )
     datapoint_id: Mapped[str] = mapped_column(String(200), index=True)
     value: Mapped[float] = mapped_column(Float)
     quality: Mapped[str] = mapped_column(String(20), default="good")
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        Index("ix_hist_samples_cfg_dp_id", "cfg_data_point_id"),
+        Index("ix_hist_samples_cfg_dp_ts", "cfg_data_point_id", "ts"),
+    )
 
 
 class HistorianHourlyRollup(Base):
@@ -578,6 +586,9 @@ class HistorianHourlyRollup(Base):
     bucket_start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     plc_id: Mapped[str] = mapped_column(String(200), index=True)
+    cfg_data_point_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_points.id", ondelete="SET NULL"), nullable=True
+    )
     datapoint_id: Mapped[str] = mapped_column(String(200), index=True)
 
     avg_value: Mapped[float] = mapped_column(Float)
@@ -587,6 +598,8 @@ class HistorianHourlyRollup(Base):
 
     __table_args__ = (
         UniqueConstraint("bucket_start", "plc_id", "datapoint_id", name="uq_rollup_bucket_plc_dp"),
+        Index("ix_hist_rollups_cfg_dp_id", "cfg_data_point_id"),
+        Index("ix_hist_rollups_cfg_dp_bucket", "cfg_data_point_id", "bucket_start"),
     )
 
 

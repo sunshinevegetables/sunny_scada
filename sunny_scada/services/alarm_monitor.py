@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 
 from sunny_scada.db.models import AlarmRule, CfgContainer, CfgDataPoint, CfgEquipment
 from sunny_scada.services.alarm_manager import AlarmManager
+from sunny_scada.services.datapoint_identity import (
+    AmbiguousDatapointIdentifierError,
+    parse_canonical_datapoint_key,
+    resolve_cfg_datapoint_identifier,
+)
 from sunny_scada.services.alarm_rules_logic import evaluate_rule, is_rule_active
 
 logger = logging.getLogger(__name__)
@@ -56,29 +61,69 @@ class AlarmMonitor:
         self._lock = threading.RLock()
 
         self._rules_by_dp: dict[int, list[AlarmRule]] = {}
-        self._dp_map: dict[tuple[str, str], int] = {}
+        self._dp_map: dict[tuple[str, int, str], int] = {}
 
     def invalidate_cache(self) -> None:
         with self._lock:
             self._rules_by_dp.clear()
             self._dp_map.clear()
 
-    def _resolve_datapoint_id(self, db: Session, plc_name: str, label: str) -> Optional[int]:
-        """
-        Minimal resolver: label -> cfg_data_points.id
+    def _resolve_datapoint_id(
+        self,
+        db: Session,
+        *,
+        plc_name: str,
+        leaf_key: str,
+        leaf: Dict[str, Any],
+    ) -> Optional[int]:
+        parsed_key_id = parse_canonical_datapoint_key(leaf_key)
+        if parsed_key_id is not None:
+            return int(parsed_key_id)
 
-        NOTE:
-        If your cfg_data_points.label does NOT match snapshot leaf key (label),
-        dp_id will never resolve. In that case, the best fix is to embed datapoint_id
-        into the snapshot leaves in PLCReader, or resolve by address.
-        """
-        key = (plc_name, label)
+        raw_leaf_id = leaf.get("id")
+        if isinstance(raw_leaf_id, int):
+            return int(raw_leaf_id)
+
+        owner_type = leaf.get("owner_type")
+        owner_id = leaf.get("owner_id")
+        label = str(leaf.get("label") or "").strip()
+        if not owner_type or owner_id is None or not label:
+            logger.error(
+                "AlarmMonitor missing scoped datapoint identity plc=%s leaf=%s owner_type=%s owner_id=%s label=%s",
+                plc_name,
+                leaf_key,
+                owner_type,
+                owner_id,
+                label,
+            )
+            return None
+
+        key = (str(owner_type), int(owner_id), label)
         with self._lock:
             if key in self._dp_map:
                 return self._dp_map[key]
 
-        row = db.query(CfgDataPoint.id).filter(CfgDataPoint.label == label).first()
-        dp_id = int(row[0]) if row else None
+        try:
+            resolved = resolve_cfg_datapoint_identifier(
+                db,
+                datapoint_id=label,
+                plc_name=plc_name,
+                owner_type=str(owner_type),
+                owner_id=int(owner_id),
+                label=label,
+            )
+        except AmbiguousDatapointIdentifierError as exc:
+            logger.error(
+                "AlarmMonitor ambiguous scoped label lookup plc=%s owner_type=%s owner_id=%s label=%s candidates=%s",
+                plc_name,
+                owner_type,
+                owner_id,
+                label,
+                exc.candidates,
+            )
+            return None
+
+        dp_id = resolved.cfg_data_point_id
 
         if dp_id is not None:
             with self._lock:
@@ -155,7 +200,7 @@ class AlarmMonitor:
         """Process data in new database-driven format."""
         now = _utcnow()
 
-        for label, leaf in data_points.items():
+        for leaf_key, leaf in data_points.items():
             if not isinstance(leaf, dict):
                 continue
 
@@ -169,12 +214,12 @@ class AlarmMonitor:
             except Exception:
                 continue
 
+            label = str(leaf.get("label") or leaf_key)
+
             logger.debug("AlarmMonitor numeric leaf plc=%s label=%s value=%s", plc_name, label, value)
 
-            # Resolve datapoint ID from label
-            dp_id: Optional[int] = leaf.get("id")
-            if not dp_id:
-                dp_id = self._resolve_datapoint_id(db, plc_name, label)
+            # Resolve datapoint ID from canonical key / embedded id / scoped fallback
+            dp_id = self._resolve_datapoint_id(db, plc_name=plc_name, leaf_key=str(leaf_key), leaf=leaf)
 
             logger.debug("AlarmMonitor resolved dp_id=%s plc=%s label=%s", dp_id, plc_name, label)
 
@@ -245,7 +290,8 @@ class AlarmMonitor:
 
         # Real processing pass
         for path, leaf in _iter_leaves(device_data):
-            label = path[-1] if path else ""
+            leaf_key = path[-1] if path else ""
+            label = str(leaf.get("label") or leaf_key)
             if not label:
                 continue
 
@@ -274,18 +320,7 @@ class AlarmMonitor:
 
             logger.debug("AlarmMonitor numeric leaf plc=%s label=%s type=%s value=%s", plc_name, label, typ, value)
 
-            # Best-effort dp_id embedded in leaf first
-            dp_id: Optional[int] = None
-            for k in ("datapoint_id", "data_point_id", "id"):
-                if k in leaf and leaf.get(k) is not None:
-                    try:
-                        dp_id = int(leaf.get(k))
-                        break
-                    except Exception:
-                        pass
-
-            if dp_id is None:
-                dp_id = self._resolve_datapoint_id(db, plc_name, label)
+            dp_id: Optional[int] = self._resolve_datapoint_id(db, plc_name=plc_name, leaf_key=str(leaf_key), leaf=leaf)
 
             logger.debug("AlarmMonitor resolved dp_id=%s plc=%s label=%s", dp_id, plc_name, label)
 
