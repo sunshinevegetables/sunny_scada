@@ -282,6 +282,24 @@ input::placeholder {
   padding: 2px 8px;
 }
 
+.badge.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: var(--panel2);
+}
+
+.badge.warn {
+  color: var(--text);
+  border-color: var(--muted);
+  background: var(--panel2);
+}
+
+.badge.error {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--panel2);
+}
+
 .modal {
   border: 1px solid var(--border);
   border-radius: 12px;

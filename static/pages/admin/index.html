@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SCADA Admin Panel</title>
-    <link rel="stylesheet" href="/styles/admin.css?v=20260229" />
+    <link rel="stylesheet" href="/styles/admin.css?v=20260237" />
   </head>
   <body class="admin-app">
     <div class="layout">
@@ -727,6 +727,404 @@
       </form>
     </dialog>
 
+    <dialog id="modal-instrument-detail" class="modal">
+      <div class="modal-body">
+        <h3 id="instrument-detail-title">Instrument Detail</h3>
+
+        <div class="row" style="gap: 8px; flex-wrap: wrap; margin-bottom: 10px">
+          <button type="button" class="btn small primary" data-tab="overview">Overview</button>
+          <button type="button" class="btn small" data-tab="mapping">Datapoint Mapping</button>
+          <button type="button" class="btn small" data-tab="health">Health</button>
+          <button type="button" class="btn small" data-tab="calibration">Calibration</button>
+          <button type="button" class="btn small" data-tab="spares">Spares</button>
+          <button type="button" class="btn small" data-tab="workorders">Work Orders</button>
+        </div>
+
+        <div id="instrument-detail-tab-overview">
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <label>
+              Instrument Code
+              <input id="instrument-detail-code" readonly />
+            </label>
+            <label>
+              Name
+              <input id="instrument-detail-name" readonly />
+            </label>
+            <label>
+              Type
+              <input id="instrument-detail-type" readonly />
+            </label>
+            <label>
+              Model
+              <input id="instrument-detail-model" readonly />
+            </label>
+            <label>
+              Serial No
+              <input id="instrument-detail-serial" readonly />
+            </label>
+            <label>
+              Status
+              <input id="instrument-detail-status" readonly />
+            </label>
+            <label>
+              Equipment
+              <input id="instrument-detail-equipment" readonly />
+            </label>
+            <label>
+              Location
+              <input id="instrument-detail-location" readonly />
+            </label>
+            <label>
+              Criticality
+              <input id="instrument-detail-criticality" readonly />
+            </label>
+            <label>
+              Datapoint Mapping
+              <input id="instrument-detail-mapping" readonly />
+            </label>
+          </div>
+        </div>
+
+        <div id="instrument-detail-tab-mapping" class="hidden">
+          <div class="muted" style="margin-bottom: 8px">Current Mappings</div>
+          <div class="table-wrap" style="margin-bottom: 12px">
+            <table class="table" id="instrument-detail-mapping-table">
+              <thead>
+                <tr>
+                  <th style="width: 110px">Role</th>
+                  <th style="width: 140px">cfg_data_point_id</th>
+                  <th>Label</th>
+                  <th style="width: 130px">Address</th>
+                  <th style="width: 180px">Owner</th>
+                  <th style="width: 120px">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="hr"></div>
+          <div class="muted">Add Mapping</div>
+          <div class="split" style="grid-template-columns: 1fr 1fr; margin-top: 8px">
+            <label>
+              Equipment
+              <select id="instrument-detail-map-equipment" class="input">
+                <option value="">Select equipment</option>
+              </select>
+            </label>
+            <label>
+              Search
+              <input id="instrument-detail-map-search" class="input" placeholder="Filter by label / address / type" />
+            </label>
+            <label>
+              Results
+              <select id="instrument-detail-map-dp" class="input">
+                <option value="">Select datapoint</option>
+              </select>
+            </label>
+            <label>
+              Role
+              <select id="instrument-detail-map-role" class="input">
+                <option value="process" selected>process</option>
+                <option value="pv">pv</option>
+                <option value="raw">raw</option>
+                <option value="status">status</option>
+                <option value="diag">diag</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="row right" style="margin-top: 8px">
+            <button type="button" class="btn primary" id="btn-instrument-detail-add-mapping">Add Mapping</button>
+          </div>
+          <div id="instrument-detail-mapping-status" class="status"></div>
+        </div>
+        <div id="instrument-detail-tab-health" class="hidden">
+          <div class="row" style="justify-content: space-between; align-items: center">
+            <div class="muted">Instrument Health</div>
+            <button type="button" class="btn small" id="btn-instrument-detail-health-refresh">Refresh Health</button>
+          </div>
+
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <label>
+              Score
+              <div id="instrument-detail-health-score" class="row" style="min-height: 34px; align-items: center"></div>
+            </label>
+            <label>
+              last_sample_ts
+              <input id="instrument-detail-health-last-sample-ts" readonly />
+            </label>
+            <label>
+              sample_count
+              <input id="instrument-detail-health-sample-count" readonly />
+            </label>
+            <label>
+              Flags
+              <div id="instrument-detail-health-flags" class="muted">-</div>
+            </label>
+          </div>
+
+          <div class="muted">simple_stats</div>
+          <div class="split" style="grid-template-columns: 1fr 1fr">
+            <label>
+              min
+              <input id="instrument-detail-health-stat-min" readonly />
+            </label>
+            <label>
+              max
+              <input id="instrument-detail-health-stat-max" readonly />
+            </label>
+            <label>
+              avg
+              <input id="instrument-detail-health-stat-avg" readonly />
+            </label>
+            <label>
+              std
+              <input id="instrument-detail-health-stat-std" readonly />
+            </label>
+          </div>
+
+          <details>
+            <summary class="muted">Advanced query</summary>
+            <div class="split" style="grid-template-columns: 1fr 1fr; margin-top: 8px">
+              <label>
+                window_minutes
+                <input id="instrument-detail-health-window-minutes" type="number" min="1" step="1" value="10" />
+              </label>
+              <label>
+                flatline_minutes
+                <input id="instrument-detail-health-flatline-minutes" type="number" min="1" step="1" value="10" />
+              </label>
+              <label>
+                max_gap_seconds
+                <input id="instrument-detail-health-max-gap-seconds" type="number" min="1" step="1" value="30" />
+              </label>
+              <label>
+                noise_std_threshold
+                <input id="instrument-detail-health-noise-std-threshold" type="number" min="0" step="any" placeholder="optional" />
+              </label>
+            </div>
+          </details>
+
+          <div id="instrument-detail-health-status" class="status"></div>
+        </div>
+        <div id="instrument-detail-tab-calibration" class="hidden">
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+            <div id="calibration-status-banner"></div>
+            <button type="button" class="btn small" id="btn-calibration-add">+ Add</button>
+          </div>
+          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+            <table class="compact">
+              <thead>
+                <tr>
+                  <th>Date/Time</th>
+                  <th>Method</th>
+                  <th>Result</th>
+                  <th>As Found</th>
+                  <th>As Left</th>
+                  <th>Performed By</th>
+                  <th>Certificate #</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody id="calibration-table-body"></tbody>
+            </table>
+          </div>
+          <div id="calibration-status" class="status" style="margin-top: 12px;"></div>
+        </div>
+        <div id="instrument-detail-tab-spares" class="hidden">
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+            <button type="button" class="btn small" id="btn-spares-add">+ Add Spare</button>
+          </div>
+          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+            <table class="compact">
+              <thead>
+                <tr>
+                  <th>Part Code</th>
+                  <th>Name</th>
+                  <th>Qty per Replacement</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="spares-table-body"></tbody>
+            </table>
+          </div>
+          <div id="spares-status" class="status" style="margin-top: 12px;"></div>
+        </div>
+        <div id="instrument-detail-tab-workorders" class="hidden">
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+            <button type="button" class="btn small" id="btn-workorder-add">+ Create Work Order</button>
+          </div>
+          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+            <table class="compact">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Title</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Created</th>
+                  <th>Due</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="workorders-table-body"></tbody>
+            </table>
+          </div>
+          <div id="workorders-status" class="status" style="margin-top: 12px;"></div>
+        </div>
+
+        <div class="row right" style="margin-top: 12px">
+          <button type="button" class="btn" id="btn-instrument-detail-close">Close</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="modal-add-calibration" class="modal">
+      <form method="dialog" class="modal-body" id="form-add-calibration">
+        <h3>Add Calibration</h3>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>Calibration Date/Time
+              <input id="calibration-ts" type="datetime-local" required />
+            </label>
+          </div>
+          <div class="field">
+            <label>Next Due Date
+              <input id="calibration-next-due-at" type="date" />
+            </label>
+          </div>
+        </div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>Method
+              <input id="calibration-method" type="text" placeholder="e.g., PT100 calibrator, multimeter" />
+            </label>
+          </div>
+          <div class="field">
+            <label>Result
+              <select id="calibration-result">
+                <option value="">-- Select --</option>
+                <option value="pass">Pass</option>
+                <option value="fail">Fail</option>
+                <option value="conditional">Conditional</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>As Found
+              <input id="calibration-as-found" type="text" placeholder="e.g., +0.5% error" />
+            </label>
+          </div>
+          <div class="field">
+            <label>As Left
+              <input id="calibration-as-left" type="text" placeholder="e.g., +0.1% error" />
+            </label>
+          </div>
+        </div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>Performed By
+              <input id="calibration-performed-by" type="text" placeholder="e.g., John Smith" />
+            </label>
+          </div>
+          <div class="field">
+            <label>Certificate #
+              <input id="calibration-certificate-no" type="text" placeholder="e.g., CAL-2024-001" />
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Notes
+            <textarea id="calibration-notes" placeholder="Additional notes..."></textarea>
+          </label>
+        </div>
+        <div class="hr"></div>
+        <div class="row right">
+          <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-add-spare" class="modal">
+      <form method="dialog" class="modal-body" id="form-add-spare">
+        <h3>Add Spare Part</h3>
+        <div class="field">
+          <label>Search Spare Parts
+            <input id="spare-search" type="text" placeholder="Search by code or name..." />
+          </label>
+        </div>
+        <div id="spare-search-results" style="border: 1px solid var(--border); border-radius: 4px; max-height: 200px; overflow-y: auto; margin-bottom: 12px;">
+          <div id="spare-search-results-empty" class="muted" style="padding: 12px;">No spare parts found</div>
+        </div>
+        <div class="field">
+          <label>Selected Spare Part
+            <input id="spare-selected" type="text" placeholder="Select a spare part" readonly />
+            <input id="spare-selected-id" type="hidden" />
+          </label>
+        </div>
+        <div class="field">
+          <label>Qty per Replacement
+            <input id="spare-qty-per-replacement" type="number" min="1" step="1" value="1" />
+          </label>
+        </div>
+        <div class="hr"></div>
+        <div class="row right">
+          <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="submit" class="btn primary">Add</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="modal-create-workorder" class="modal">
+      <form method="dialog" class="modal-body" id="form-create-workorder">
+        <h3>Create Work Order</h3>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>Title
+              <input id="workorder-title" type="text" placeholder="Brief description" required />
+            </label>
+          </div>
+          <div class="field">
+            <label>Priority
+              <select id="workorder-priority" required>
+                <option value="">-- Select --</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Description
+            <textarea id="workorder-description" placeholder="Full details..."></textarea>
+          </label>
+        </div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <div class="field">
+            <label>Due Date (optional)
+              <input id="workorder-due-at" type="date" />
+            </label>
+          </div>
+          <div class="field">
+            <label>Assigned User ID (optional)
+              <input id="workorder-assigned-user-id" type="number" placeholder="e.g., 123" />
+            </label>
+          </div>
+        </div>
+        <div class="hr"></div>
+        <div class="row right">
+          <button type="button" class="btn" onclick="this.closest('dialog').close()">Cancel</button>
+          <button type="submit" class="btn primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="modal-add-child" class="modal">
       <form method="dialog" class="modal-body" id="form-add-child">
         <h3 id="child-title">Add</h3>
@@ -874,6 +1272,6 @@
     </dialog>
 
     <div id="toast" class="toast hidden"></div>
-    <script src="/scripts/admin.js?v=20260229"></script>
+    <script src="/scripts/admin.js?v=20260240"></script>
   </body>
 </html>

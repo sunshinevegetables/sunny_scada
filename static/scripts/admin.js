@@ -25,6 +25,22 @@
     return node;
   }
 
+  function renderHealthBadge(score, flags = []) {
+    const value = Number(score);
+    const safeScore = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : null;
+    const cls = safeScore === null ? "" : safeScore >= 80 ? "ok" : safeScore >= 50 ? "warn" : "error";
+    const tooltip = Array.isArray(flags) && flags.length ? flags.join(", ") : "No flags";
+    return el(
+      "span",
+      {
+        class: `badge ${cls}`.trim(),
+        title: tooltip,
+        text: safeScore === null ? "-" : `${safeScore}`,
+      },
+      []
+    );
+  }
+
   function clampInt(value, fallback = 0) {
     const n = Number.parseInt(String(value), 10);
     return Number.isFinite(n) ? n : fallback;
@@ -2544,7 +2560,7 @@
       renderDetails();
     }
 
-    return { show };
+    return { show, refreshDatapointInstrumentLinks };
   })();
 
   // Shared utility: ensure config tree is loaded
@@ -2597,8 +2613,17 @@
   const instrumentsView = (() => {
     let initialized = false;
     let editingInstrumentId = null;
+    let currentInstrumentDetail = null;
+    let currentInstrumentMappings = [];
+    let currentInstrumentCalibrations = [];
+    let currentInstrumentSpares = [];
+    let currentInstrumentWorkOrders = [];
+    let sparesPartsCatalog = [];
     let instrumentsCache = [];
     let instrumentsCacheFiltered = [];
+    const instrumentHealthCache = new Map();
+    const instrumentHealthLoading = new Set();
+    let healthRowObserver = null;
     let pageIndex = 0;
     const PAGE_SIZE = 25;
 
@@ -2614,6 +2639,25 @@
       const filterCalibration = $("instrument-filter-calibration");
       const btnPrev = $("btn-instruments-prev");
       const btnNext = $("btn-instruments-next");
+      const detailModal = $("modal-instrument-detail");
+      const detailClose = $("btn-instrument-detail-close");
+      const mapEquipment = $("instrument-detail-map-equipment");
+      const mapSearch = $("instrument-detail-map-search");
+      const mapAdd = $("btn-instrument-detail-add-mapping");
+      const mapTable = $("instrument-detail-mapping-table");
+      const healthRefresh = $("btn-instrument-detail-health-refresh");
+      const btnCalibrationAdd = $("btn-calibration-add");
+      const calModal = $("modal-add-calibration");
+      const calForm = $("form-add-calibration");
+      const btnSparesAdd = $("btn-spares-add");
+      const spareModal = $("modal-add-spare");
+      const spareForm = $("form-add-spare");
+      const spareSearch = $("spare-search");
+      const spareTable = $("spares-table-body");
+      const btnWorkOrderAdd = $("btn-workorder-add");
+      const woModal = $("modal-create-workorder");
+      const woForm = $("form-create-workorder");
+      const woTable = $("workorders-table-body");
 
       btnRefresh?.addEventListener("click", () => reloadAndRender());
       btnAdd?.addEventListener("click", async () => {
@@ -2651,6 +2695,130 @@
         pageIndex += 1;
         renderTable();
       });
+      detailClose?.addEventListener("click", () => closeDialog("modal-instrument-detail"));
+      detailModal?.addEventListener("click", async (ev) => {
+        const tabButton = ev.target.closest("button[data-tab]");
+        if (!tabButton) return;
+        const tab = String(tabButton.dataset.tab || "overview");
+        setInstrumentDetailTab(tab);
+        if (tab === "mapping") {
+          try {
+            await loadInstrumentMappings();
+          } catch (err) {
+            setStatus("instrument-detail-mapping-status", err?.message || "Failed to load mappings", "error");
+          }
+          return;
+        }
+        if (tab === "health") {
+          try {
+            await loadAndRenderInstrumentHealth(false);
+          } catch (err) {
+            setStatus("instrument-detail-health-status", err?.message || "Failed to load health", "error");
+          }
+          return;
+        }
+        if (tab === "calibration") {
+          try {
+            await loadInstrumentCalibrations();
+          } catch (err) {
+            setStatus("calibration-status", err?.message || "Failed to load calibrations", "error");
+          }
+          return;
+        }
+        if (tab === "spares") {
+          try {
+            await loadInstrumentSpares();
+          } catch (err) {
+            setStatus("spares-status", err?.message || "Failed to load spares", "error");
+          }
+          return;
+        }
+        if (tab === "workorders") {
+          try {
+            await loadInstrumentWorkOrders();
+          } catch (err) {
+            setStatus("workorders-status", err?.message || "Failed to load work orders", "error");
+          }
+        }
+      });
+      mapEquipment?.addEventListener("change", () => renderMappingSearchResults());
+      mapSearch?.addEventListener("input", () => renderMappingSearchResults());
+      mapAdd?.addEventListener("click", async () => {
+        await addInstrumentMapping();
+      });
+      healthRefresh?.addEventListener("click", async () => {
+        await loadAndRenderInstrumentHealth(true);
+      });
+      btnCalibrationAdd?.addEventListener("click", () => {
+        openAddCalibrationModal();
+      });
+      calForm?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await saveCalibration();
+        calForm.reset();
+        calModal?.close();
+        await loadInstrumentCalibrations();
+      });
+      btnSparesAdd?.addEventListener("click", async () => {
+        await openAddSpareModal();
+      });
+      spareSearch?.addEventListener("input", () => renderSpareSearchResults());
+      spareForm?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await addInstrumentSpare();
+        spareForm.reset();
+        spareModal?.close();
+        await loadInstrumentSpares();
+      });
+      spareTable?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action='unmap-spare']");
+        if (!btn) return;
+        const spareId = clampInt(btn.dataset.spareId, 0);
+        if (!spareId) return;
+        await removeInstrumentSpare(spareId);
+      });
+      btnWorkOrderAdd?.addEventListener("click", async () => {
+        await openCreateWorkOrderModal();
+      });
+      woForm?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await createWorkOrder();
+        woForm.reset();
+        woModal?.close();
+        await loadInstrumentWorkOrders();
+      });
+      woTable?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action='view-workorder']");
+        if (!btn) return;
+        const woId = clampInt(btn.dataset.woId, 0);
+        if (woId) {
+          alert(`View work order ${woId} (navigate to maintenance/work_orders/${woId})`);
+        }
+      });
+      mapTable?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action='unlink']");
+        if (!btn) return;
+        const mapId = clampInt(btn.dataset.mapId, 0);
+        if (!mapId) return;
+        await unlinkInstrumentMapping(mapId);
+      });
+
+      if (typeof IntersectionObserver === "function") {
+        healthRowObserver = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              const node = entry.target;
+              const id = clampInt(node?.dataset?.healthCell || 0, 0);
+              if (id) {
+                loadInstrumentHealthForRow(id, false).catch(() => {});
+              }
+              healthRowObserver?.unobserve(node);
+            }
+          },
+          { root: null, threshold: 0.1 }
+        );
+      }
 
       form?.addEventListener("submit", async (ev) => {
         ev.preventDefault();
@@ -2858,12 +3026,166 @@
       renderTable();
     }
 
+    function defaultHealthQuery() {
+      return {
+        window_minutes: 10,
+        flatline_minutes: 10,
+        max_gap_seconds: 30,
+      };
+    }
+
+    function getHealthQueryFromControls() {
+      const base = defaultHealthQuery();
+      const windowMinutes = clampInt($("instrument-detail-health-window-minutes")?.value, base.window_minutes);
+      const flatlineMinutes = clampInt($("instrument-detail-health-flatline-minutes")?.value, base.flatline_minutes);
+      const maxGapSeconds = clampInt($("instrument-detail-health-max-gap-seconds")?.value, base.max_gap_seconds);
+      const noiseRaw = String($("instrument-detail-health-noise-std-threshold")?.value || "").trim();
+      const noise = noiseRaw ? clampFloat(noiseRaw, 0) : null;
+
+      const query = {
+        window_minutes: windowMinutes,
+        flatline_minutes: flatlineMinutes,
+        max_gap_seconds: maxGapSeconds,
+      };
+      if (noise && noise > 0) query.noise_std_threshold = noise;
+      return query;
+    }
+
+    function healthCacheKey(instrumentId, query) {
+      const q = query || {};
+      return [
+        clampInt(instrumentId, 0),
+        clampInt(q.window_minutes, 10),
+        clampInt(q.flatline_minutes, 10),
+        clampInt(q.max_gap_seconds, 30),
+        q.noise_std_threshold == null ? "" : String(q.noise_std_threshold),
+      ].join("|");
+    }
+
+    async function fetchInstrumentHealth(instrumentId, query, force = false) {
+      const id = clampInt(instrumentId, 0);
+      if (!id) return null;
+      const key = healthCacheKey(id, query);
+
+      if (!force && instrumentHealthCache.has(key)) {
+        return instrumentHealthCache.get(key);
+      }
+      if (instrumentHealthLoading.has(key)) return null;
+
+      instrumentHealthLoading.add(key);
+      try {
+        const data = await api.get(`/maintenance/instruments/${id}/health`, { query });
+        instrumentHealthCache.set(key, data || null);
+        return data || null;
+      } finally {
+        instrumentHealthLoading.delete(key);
+      }
+    }
+
+    function renderHealthTabData(payload) {
+      const scoreHost = $("instrument-detail-health-score");
+      const flagsHost = $("instrument-detail-health-flags");
+      const stats = payload?.simple_stats || {};
+      const flags = Array.isArray(payload?.flags) ? payload.flags : [];
+
+      if (scoreHost) {
+        scoreHost.innerHTML = "";
+        scoreHost.appendChild(renderHealthBadge(payload?.score_0_100, flags));
+      }
+
+      if (flagsHost) {
+        flagsHost.innerHTML = "";
+        if (!flags.length) {
+          flagsHost.textContent = "-";
+        } else {
+          const ul = el("ul", { style: "margin: 0; padding-left: 18px" }, []);
+          for (const flag of flags) {
+            ul.appendChild(el("li", { text: String(flag) }, []));
+          }
+          flagsHost.appendChild(ul);
+        }
+      }
+
+      setDetailValue("instrument-detail-health-last-sample-ts", payload?.last_sample_ts || "-");
+      setDetailValue("instrument-detail-health-sample-count", payload?.sample_count ?? "-");
+      setDetailValue("instrument-detail-health-stat-min", stats?.min ?? "-");
+      setDetailValue("instrument-detail-health-stat-max", stats?.max ?? "-");
+      setDetailValue("instrument-detail-health-stat-avg", stats?.avg ?? "-");
+      setDetailValue("instrument-detail-health-stat-std", stats?.std ?? "-");
+    }
+
+    async function loadAndRenderInstrumentHealth(force = false) {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+      const query = getHealthQueryFromControls();
+
+      setStatus("instrument-detail-health-status", "Loading health...", "");
+      try {
+        const payload = await fetchInstrumentHealth(instrumentId, query, force);
+        renderHealthTabData(payload || {});
+        setStatus("instrument-detail-health-status", "Health loaded.", "ok");
+      } catch (err) {
+        setStatus("instrument-detail-health-status", err?.message || "Failed to load health", "error");
+      }
+    }
+
+    function renderHealthCellContent(cell, instrumentId) {
+      if (!cell) return;
+      const id = clampInt(instrumentId, 0);
+      const query = defaultHealthQuery();
+      const key = healthCacheKey(id, query);
+      const cached = instrumentHealthCache.get(key) || null;
+
+      cell.innerHTML = "";
+      if (cached) {
+        const flags = Array.isArray(cached?.flags) ? cached.flags : [];
+        cell.appendChild(renderHealthBadge(cached?.score_0_100, flags));
+      } else if (instrumentHealthLoading.has(key)) {
+        cell.appendChild(el("span", { class: "muted", text: "..." }, []));
+      } else {
+        cell.appendChild(el("span", { class: "muted", text: "-" }, []));
+      }
+
+      cell.appendChild(document.createTextNode(" "));
+      cell.appendChild(
+        el(
+          "button",
+          {
+            class: "btn small",
+            type: "button",
+            title: "Load Health",
+            dataset: { action: "load-health", id: String(id) },
+            text: "⟳",
+          },
+          []
+        )
+      );
+    }
+
+    async function loadInstrumentHealthForRow(instrumentId, force = false) {
+      const id = clampInt(instrumentId, 0);
+      if (!id) return;
+      const cell = document.querySelector(`#instruments-table [data-health-cell='${id}']`);
+      const query = defaultHealthQuery();
+      renderHealthCellContent(cell, id);
+      try {
+        await fetchInstrumentHealth(id, query, force);
+      } catch {
+        // ignore row-level load errors to keep table rendering resilient
+      }
+      renderHealthCellContent(cell, id);
+    }
+
     function renderTable() {
       const tableBody = $("instruments-table")?.querySelector("tbody");
       const pagination = $("instruments-pagination");
       const btnPrev = $("btn-instruments-prev");
       const btnNext = $("btn-instruments-next");
       if (!tableBody) return;
+
+      if (healthRowObserver) {
+        healthRowObserver.disconnect();
+      }
 
       const start = pageIndex * PAGE_SIZE;
       const rows = instrumentsCacheFiltered.slice(start, start + PAGE_SIZE);
@@ -2876,10 +3198,12 @@
         const equipmentName = String(inst?.equipment?.name || "-");
         const type = String(inst?.instrument_type || "");
         const pvDatapoint = String(inst?.mapped_datapoints?.[0]?.label || "-");
-        const healthScore = String(inst?.meta?.health_score ?? "-");
         const calibrationDue = String(inst?.meta?.calibration_due || "-");
         const sparesStatus = String(inst?.meta?.spares_status || "-");
         const status = String(inst?.status || "");
+
+        const healthCell = el("td", { dataset: { healthCell: String(id) } }, []);
+        renderHealthCellContent(healthCell, id);
 
         const row = el("tr", {}, [
           el("td", { text: code }),
@@ -2887,7 +3211,7 @@
           el("td", { text: equipmentName }),
           el("td", { text: type }),
           el("td", { text: pvDatapoint }),
-          el("td", { text: healthScore }),
+          healthCell,
           el("td", { text: calibrationDue }),
           el("td", { text: sparesStatus }),
           el("td", {}, [
@@ -2897,6 +3221,13 @@
             }),
           ]),
           el("td", {}, [
+            el("button", {
+              class: "btn small",
+              type: "button",
+              dataset: { action: "view", id: String(id) },
+              text: "View",
+            }),
+            " ",
             el("button", {
               class: "btn small",
               type: "button",
@@ -2920,6 +3251,14 @@
           ]),
         ]);
         tableBody.appendChild(row);
+        if (healthRowObserver) {
+          healthRowObserver.observe(healthCell);
+        } else {
+          const rect = healthCell.getBoundingClientRect();
+          if (rect.top < window.innerHeight && rect.bottom > 0) {
+            loadInstrumentHealthForRow(id, false).catch(() => {});
+          }
+        }
       }
 
       const filteredTotal = instrumentsCacheFiltered.length;
@@ -2928,6 +3267,709 @@
       if (btnNext) btnNext.disabled = (pageIndex + 1) * PAGE_SIZE >= filteredTotal;
 
       setStatus("instruments-status", `Showing ${filteredTotal} instrument(s)`, "ok");
+    }
+
+    function setDetailValue(id, value) {
+      const node = $(id);
+      if (!node) return;
+      node.value = String(value ?? "");
+    }
+
+    function setInstrumentDetailTab(tab) {
+      const tabs = ["overview", "mapping", "health", "calibration", "spares", "workorders"];
+      for (const key of tabs) {
+        const panel = $(`instrument-detail-tab-${key}`);
+        panel?.classList.toggle("hidden", key !== tab);
+      }
+      const modal = $("modal-instrument-detail");
+      const buttons = modal ? modal.querySelectorAll("button[data-tab]") : [];
+      for (const btn of buttons) {
+        const isActive = String(btn.dataset.tab || "") === tab;
+        btn.classList.toggle("primary", isActive);
+      }
+    }
+
+    function getDatapointAddress(raw) {
+      if (!raw || typeof raw !== "object") return "-";
+      const value =
+        raw.address ??
+        raw.register ??
+        raw.register_address ??
+        raw.modbus_address ??
+        raw.offset ??
+        raw.channel ??
+        null;
+      return value === null || typeof value === "undefined" || value === "" ? "-" : String(value);
+    }
+
+    function getCfgDatapointInfo(dpId) {
+      const node = state.cfgIndex.get(`datapoint:${clampInt(dpId, 0)}`) || null;
+      if (!node) {
+        return {
+          label: "-",
+          address: "-",
+          type: "-",
+          ownerName: "-",
+          ownerId: 0,
+        };
+      }
+
+      let ownerName = "-";
+      let ownerId = 0;
+      let parentKey = node.parentKey;
+      while (parentKey) {
+        const parent = state.cfgIndex.get(parentKey);
+        if (!parent) break;
+        if (parent.type === "equipment") {
+          ownerName = String(parent.name || "-");
+          ownerId = clampInt(parent.id, 0);
+          break;
+        }
+        parentKey = parent.parentKey;
+      }
+
+      return {
+        label: String(node.raw?.label || node.name || "-"),
+        address: getDatapointAddress(node.raw),
+        type: String(node.raw?.type || node.raw?.register_type || "-"),
+        ownerName,
+        ownerId,
+      };
+    }
+
+    async function populateMappingEquipmentOptions(defaultEquipmentId = 0) {
+      await ensureConfigTreeLoaded();
+      const sel = $("instrument-detail-map-equipment");
+      if (!sel) return;
+
+      const options = [];
+      if (Array.isArray(state.cfgTree)) {
+        for (const plc of state.cfgTree) {
+          const plcName = String(plc?.name || "PLC");
+          const containers = Array.isArray(plc?.containers) ? plc.containers : [];
+          for (const c of containers) {
+            const cName = String(c?.name || "Container");
+            const equipmentList = Array.isArray(c?.equipment) ? c.equipment : [];
+            for (const e of equipmentList) {
+              options.push({
+                id: clampInt(e?.id, 0),
+                label: `${String(e?.name || "Equipment")} (${plcName} / ${cName})`,
+              });
+            }
+          }
+        }
+      }
+
+      const current = String(sel.value || "");
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: "Select equipment" }));
+      const seen = new Set();
+      for (const item of options) {
+        const id = clampInt(item.id, 0);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        sel.appendChild(el("option", { value: String(id), text: item.label }));
+      }
+
+      const preferred = defaultEquipmentId ? String(defaultEquipmentId) : current;
+      sel.value = Array.from(sel.options).some((o) => o.value === preferred) ? preferred : "";
+    }
+
+    function getEquipmentDatapointsForMapping(equipmentId) {
+      const eqId = clampInt(equipmentId, 0);
+      if (!eqId) return [];
+      const eqNode = state.cfgIndex.get(`equipment:${eqId}`);
+      const rawDatapoints = Array.isArray(eqNode?.raw?.datapoints) ? eqNode.raw.datapoints : [];
+      return rawDatapoints
+        .map((dp) => {
+          const dpId = clampInt(dp?.id, 0);
+          if (!dpId) return null;
+          return {
+            id: dpId,
+            label: String(dp?.label || `DP-${dpId}`),
+            address: getDatapointAddress(dp),
+            type: String(dp?.type || dp?.register_type || ""),
+          };
+        })
+        .filter(Boolean);
+    }
+
+    function renderMappingSearchResults() {
+      const equipmentId = clampInt($("instrument-detail-map-equipment")?.value || 0, 0);
+      const term = String($("instrument-detail-map-search")?.value || "").trim().toLowerCase();
+      const sel = $("instrument-detail-map-dp");
+      if (!sel) return;
+
+      const datapoints = getEquipmentDatapointsForMapping(equipmentId);
+      const filtered = term
+        ? datapoints.filter((dp) => {
+            const haystack = `${dp.label} ${dp.address} ${dp.type}`.toLowerCase();
+            return haystack.includes(term);
+          })
+        : datapoints;
+
+      const current = String(sel.value || "");
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: filtered.length ? "Select datapoint" : "No datapoints found" }));
+      for (const dp of filtered) {
+        const text = `${dp.label} • ${dp.address} • ${dp.type || "-"}`;
+        sel.appendChild(el("option", { value: String(dp.id), text }));
+      }
+      sel.value = Array.from(sel.options).some((o) => o.value === current) ? current : "";
+    }
+
+    function renderMappingTable() {
+      const tbody = $("instrument-detail-mapping-table")?.querySelector("tbody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      for (const mapping of currentInstrumentMappings) {
+        const mapId = clampInt(mapping?.id, 0);
+        const dpId = clampInt(mapping?.cfg_data_point_id, 0);
+        const role = String(mapping?.role || "-");
+        const dpInfo = getCfgDatapointInfo(dpId);
+
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { text: role }),
+            el("td", { text: String(dpId || "-") }),
+            el("td", { text: dpInfo.label }),
+            el("td", { text: dpInfo.address }),
+            el("td", { text: dpInfo.ownerName }),
+            el("td", {}, [
+              el("button", {
+                class: "btn small danger",
+                type: "button",
+                dataset: { action: "unlink", mapId: String(mapId) },
+                text: "Unlink",
+              }),
+            ]),
+          ])
+        );
+      }
+
+      if (!currentInstrumentMappings.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No mappings" })]));
+      }
+    }
+
+    async function loadInstrumentMappings() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      setStatus("instrument-detail-mapping-status", "Loading mappings...", "");
+      const rows = await api.get(`/maintenance/instruments/${instrumentId}/datapoints`);
+      currentInstrumentMappings = Array.isArray(rows) ? rows : [];
+      renderMappingTable();
+      renderMappingSearchResults();
+      setStatus("instrument-detail-mapping-status", `Loaded ${currentInstrumentMappings.length} mapping(s).`, "ok");
+    }
+
+    async function refreshPlcLinksForDatapoint(dpId) {
+      const dpInfo = getCfgDatapointInfo(dpId);
+      const eqId = clampInt(dpInfo.ownerId, 0);
+      if (!eqId) return;
+      if (plcView && typeof plcView.refreshDatapointInstrumentLinks === "function") {
+        try {
+          await plcView.refreshDatapointInstrumentLinks(eqId, true);
+        } catch {
+          // ignore bridge refresh failures in instruments tab
+        }
+      }
+    }
+
+    async function addInstrumentMapping() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      const dpId = clampInt($("instrument-detail-map-dp")?.value || 0, 0);
+      const role = String($("instrument-detail-map-role")?.value || "process").trim() || "process";
+      if (!dpId) {
+        setStatus("instrument-detail-mapping-status", "Select a datapoint first.", "error");
+        return;
+      }
+
+      if (role === "pv") {
+        const existingPv = currentInstrumentMappings.some((m) => String(m?.role || "").toLowerCase() === "pv");
+        if (existingPv) {
+          setStatus("instrument-detail-mapping-status", "Only one PV mapping is allowed per instrument.", "error");
+          return;
+        }
+      }
+
+      setStatus("instrument-detail-mapping-status", "Adding mapping...", "");
+      await api.post(`/maintenance/instruments/${instrumentId}/datapoints`, {
+        json: {
+          cfg_data_point_id: dpId,
+          role,
+        },
+      });
+      await loadInstrumentMappings();
+      await refreshPlcLinksForDatapoint(dpId);
+      setStatus("instrument-detail-mapping-status", "Mapping added.", "ok");
+    }
+
+    async function unlinkInstrumentMapping(mapId) {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId || !mapId) return;
+
+      const target = currentInstrumentMappings.find((m) => clampInt(m?.id, 0) === mapId) || null;
+      const dpId = clampInt(target?.cfg_data_point_id, 0);
+
+      if (!confirmDanger("Unlink this datapoint mapping?")) return;
+      setStatus("instrument-detail-mapping-status", "Unlinking...", "");
+      await api.delete(`/maintenance/instruments/${instrumentId}/datapoints/${mapId}`);
+      await loadInstrumentMappings();
+      if (dpId) await refreshPlcLinksForDatapoint(dpId);
+      setStatus("instrument-detail-mapping-status", "Mapping removed.", "ok");
+    }
+
+    function formatDateTimeISO(isoStr) {
+      if (!isoStr) return "-";
+      const d = new Date(isoStr);
+      if (!Number.isFinite(d.getTime())) return "-";
+      return d.toLocaleString();
+    }
+
+    function calculateCalibrationStatus(calibrations) {
+      if (!Array.isArray(calibrations) || !calibrations.length) {
+        return { status: "OK", badge: "ok", nextDueAt: null };
+      }
+
+      const sorted = calibrations.slice().sort((a, b) => {
+        const tsA = new Date(a?.ts || 0).getTime();
+        const tsB = new Date(b?.ts || 0).getTime();
+        return tsB - tsA;
+      });
+
+      const latest = sorted[0];
+      const nextDueAt = latest?.next_due_at;
+      if (!nextDueAt) {
+        return { status: "OK", badge: "ok", nextDueAt: null };
+      }
+
+      const now = new Date();
+      const dueDate = new Date(nextDueAt);
+      const daysUntilDue = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysUntilDue < 0) {
+        return { status: "Overdue", badge: "error", nextDueAt: formatDateTimeISO(nextDueAt) };
+      }
+      if (daysUntilDue <= 7) {
+        return { status: "Due Soon", badge: "warn", nextDueAt: formatDateTimeISO(nextDueAt) };
+      }
+
+      return { status: "OK", badge: "ok", nextDueAt: formatDateTimeISO(nextDueAt) };
+    }
+
+    function renderCalibrationsTable(calibrations) {
+      const tbody = $("calibration-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const sorted = Array.isArray(calibrations) ? calibrations.slice().sort((a, b) => {
+        const tsA = new Date(a?.ts || 0).getTime();
+        const tsB = new Date(b?.ts || 0).getTime();
+        return tsB - tsA;
+      }) : [];
+
+      for (const cal of sorted) {
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { text: formatDateTimeISO(cal?.ts) }),
+            el("td", { text: String(cal?.method || "-") }),
+            el("td", { text: String(cal?.result || "-") }),
+            el("td", { text: String(cal?.as_found || "-") }),
+            el("td", { text: String(cal?.as_left || "-") }),
+            el("td", { text: String(cal?.performed_by || "-") }),
+            el("td", { text: String(cal?.certificate_no || "-") }),
+            el("td", { text: String(cal?.notes || "-") }),
+          ])
+        );
+      }
+
+      if (!sorted.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "8", class: "muted", text: "No calibrations" })]));
+      }
+    }
+
+    async function loadInstrumentCalibrations() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      setStatus("calibration-status", "Loading calibrations...", "");
+      const calibrations = await api.get(`/maintenance/instruments/${instrumentId}/calibrations?limit=200`);
+      currentInstrumentCalibrations = Array.isArray(calibrations) ? calibrations : [];
+      renderCalibrationsTable(currentInstrumentCalibrations);
+
+      const bannerDiv = $("calibration-status-banner");
+      if (bannerDiv) {
+        bannerDiv.innerHTML = "";
+        const { status, badge, nextDueAt } = calculateCalibrationStatus(currentInstrumentCalibrations);
+        const badge_span = renderHealthBadge(badge === "ok" ? 80 : badge === "warn" ? 60 : 30, []);
+        const label = el("span", { text: status }, []);
+        if (nextDueAt) {
+          const due = el("span", { class: "muted smaller", text: ` (${nextDueAt})` }, []);
+          bannerDiv.appendChild(el("div", {}, [badge_span, label, due]));
+        } else {
+          bannerDiv.appendChild(el("div", {}, [badge_span, label]));
+        }
+      }
+
+      setStatus("calibration-status", `Loaded ${currentInstrumentCalibrations.length} calibration(s).`, "ok");
+    }
+
+    function openAddCalibrationModal() {
+      const now = new Date();
+      const isoStr = now.toISOString().slice(0, 16);
+      const tsInput = $("calibration-ts");
+      if (tsInput) tsInput.value = isoStr;
+
+      const nextDueInput = $("calibration-next-due-at");
+      if (nextDueInput) nextDueInput.value = "";
+
+      const resultInput = $("calibration-result");
+      if (resultInput) resultInput.value = "";
+
+      $("calibration-method").value = "";
+      $("calibration-as-found").value = "";
+      $("calibration-as-left").value = "";
+      $("calibration-performed-by").value = "";
+      $("calibration-certificate-no").value = "";
+      $("calibration-notes").value = "";
+
+      $("modal-add-calibration")?.showModal();
+    }
+
+    async function saveCalibration() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      const ts = String($("calibration-ts")?.value || "").trim();
+      const nextDueAt = String($("calibration-next-due-at")?.value || "").trim();
+      const method = String($("calibration-method")?.value || "").trim();
+      const result = String($("calibration-result")?.value || "").trim();
+      const asFound = String($("calibration-as-found")?.value || "").trim();
+      const asLeft = String($("calibration-as-left")?.value || "").trim();
+      const performedBy = String($("calibration-performed-by")?.value || "").trim();
+      const certificateNo = String($("calibration-certificate-no")?.value || "").trim();
+      const notes = String($("calibration-notes")?.value || "").trim();
+
+      if (!ts) {
+        alert("Calibration date/time is required");
+        return;
+      }
+
+      const payload = { ts, method, result, as_found: asFound, as_left: asLeft, performed_by: performedBy, certificate_no: certificateNo, notes };
+      if (nextDueAt) payload.next_due_at = nextDueAt;
+
+      setStatus("calibration-status", "Saving...", "");
+      await api.post(`/maintenance/instruments/${instrumentId}/calibrations`, payload);
+      setStatus("calibration-status", "Calibration saved.", "ok");
+    }
+
+    async function loadSparePartsCatalog() {
+      if (sparesPartsCatalog.length > 0) return;
+      const parts = await api.get("/maintenance/spare_parts");
+      sparesPartsCatalog = Array.isArray(parts) ? parts : [];
+    }
+
+    function renderSparesTable() {
+      const tbody = $("spares-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const sorted = Array.isArray(currentInstrumentSpares) ? currentInstrumentSpares.slice().sort((a, b) => {
+        const codeA = String(a?.part_code || "").toLowerCase();
+        const codeB = String(b?.part_code || "").toLowerCase();
+        return codeA.localeCompare(codeB);
+      }) : [];
+
+      for (const spare of sorted) {
+        const spareId = clampInt(spare?.spare_part_id, 0);
+        const code = String(spare?.part_code || "-");
+        const name = String(spare?.name || "-");
+        const qtyPerRepl = clampInt(spare?.qty_per_replacement, 1);
+
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { text: code }),
+            el("td", { text: name }),
+            el("td", { text: String(qtyPerRepl) }),
+            el("td", {}, [
+              el("button", {
+                class: "btn small danger",
+                type: "button",
+                dataset: { action: "unmap-spare", spareId: String(spareId) },
+                text: "Unmap",
+              }),
+            ]),
+          ])
+        );
+      }
+
+      if (!sorted.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "4", class: "muted", text: "No spares mapped" })]));
+      }
+    }
+
+    function renderSpareSearchResults() {
+      const search = String($("spare-search")?.value || "").trim().toLowerCase();
+      const resultsDiv = $("spare-search-results");
+      if (!resultsDiv) return;
+      resultsDiv.innerHTML = "";
+
+      let filtered = sparesPartsCatalog;
+      if (search) {
+        filtered = filtered.filter((part) => {
+          const code = String(part?.part_code || "").toLowerCase();
+          const name = String(part?.name || "").toLowerCase();
+          return code.includes(search) || name.includes(search);
+        });
+      }
+
+      if (!filtered.length) {
+        resultsDiv.appendChild(el("div", { class: "muted", style: "padding: 12px;", text: "No spare parts found" }, []));
+        return;
+      }
+
+      for (const part of filtered) {
+        const spareId = clampInt(part?.id, 0);
+        const code = String(part?.part_code || "-");
+        const name = String(part?.name || "-");
+        const item = el("div", {
+          class: "border-bottom",
+          style: "padding: 8px 12px; cursor: pointer; hover: background-color: var(--panel);",
+          dataset: { spareId: String(spareId), partCode: code, partName: name },
+        }, [
+          el("div", { class: "strong", text: code }, []),
+          el("div", { class: "small muted", text: name }, []),
+        ]);
+        item.addEventListener("click", () => selectSpareFromResults(spareId, code, name));
+        resultsDiv.appendChild(item);
+      }
+    }
+
+    function selectSpareFromResults(spareId, code, name) {
+      $("spare-selected-id").value = String(spareId);
+      $("spare-selected").value = `${code} - ${name}`;
+      $("spare-search-results").innerHTML = "";
+      $("spare-search").value = "";
+    }
+
+    async function openAddSpareModal() {
+      await loadSparePartsCatalog();
+      $("spare-search").value = "";
+      $("spare-selected-id").value = "";
+      $("spare-selected").value = "";
+      $("spare-qty-per-replacement").value = "1";
+      $("spare-search-results").innerHTML = "";
+      $("modal-add-spare")?.showModal();
+    }
+
+    async function addInstrumentSpare() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      const spareId = clampInt($("spare-selected-id")?.value || 0, 0);
+      const qtyPerRepl = clampInt($("spare-qty-per-replacement")?.value || 1, 1);
+
+      if (!spareId) {
+        alert("Please select a spare part");
+        return;
+      }
+
+      setStatus("spares-status", "Adding spare...", "");
+      await api.post(`/maintenance/instruments/${instrumentId}/spares`, {
+        spare_part_id: spareId,
+        qty_per_replacement: qtyPerRepl,
+      });
+      setStatus("spares-status", "Spare added.", "ok");
+    }
+
+    async function loadInstrumentSpares() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      setStatus("spares-status", "Loading spares...", "");
+      const spares = await api.get(`/maintenance/instruments/${instrumentId}/spares`);
+      currentInstrumentSpares = Array.isArray(spares) ? spares : [];
+      renderSparesTable();
+      setStatus("spares-status", `Loaded ${currentInstrumentSpares.length} spare(s).`, "ok");
+    }
+
+    async function removeInstrumentSpare(spareId) {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId || !spareId) return;
+
+      if (!confirmDanger("Unmap this spare part?")) return;
+      setStatus("spares-status", "Removing spare...", "");
+      await api.delete(`/maintenance/instruments/${instrumentId}/spares/${spareId}`);
+      await loadInstrumentSpares();
+      setStatus("spares-status", "Spare removed.", "ok");
+    }
+
+    function formatDate(isoStr) {
+      if (!isoStr) return "-";
+      const d = new Date(isoStr);
+      if (!Number.isFinite(d.getTime())) return "-";
+      return d.toLocaleDateString();
+    }
+
+    function renderWorkOrdersTable() {
+      const tbody = $("workorders-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const sorted = Array.isArray(currentInstrumentWorkOrders) ? currentInstrumentWorkOrders.slice().sort((a, b) => {
+        const tsA = new Date(a?.created_at || 0).getTime();
+        const tsB = new Date(b?.created_at || 0).getTime();
+        return tsB - tsA;
+      }) : [];
+
+      for (const wo of sorted) {
+        const woId = clampInt(wo?.id, 0);
+        const code = String(wo?.work_order_code || "-");
+        const title = String(wo?.title || "-");
+        const status = String(wo?.status || "-");
+        const priority = String(wo?.priority || "-");
+        const created = formatDate(wo?.created_at);
+        const due = formatDate(wo?.due_at);
+
+        tbody.appendChild(
+          el("tr", {}, [
+            el("td", { text: code }),
+            el("td", { text: title }),
+            el("td", { text: status }),
+            el("td", { text: priority }),
+            el("td", { text: created }),
+            el("td", { text: due }),
+            el("td", {}, [
+              el("button", {
+                class: "btn small",
+                type: "button",
+                dataset: { action: "view-workorder", woId: String(woId) },
+                text: "View",
+              }),
+            ]),
+          ])
+        );
+      }
+
+      if (!sorted.length) {
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "muted", text: "No work orders" })]));
+      }
+    }
+
+    async function loadInstrumentWorkOrders() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      if (!instrumentId) return;
+
+      setStatus("workorders-status", "Loading work orders...", "");
+      const workOrders = await api.get(`/maintenance/work_orders?instrument_id=${instrumentId}&limit=100`);
+      currentInstrumentWorkOrders = Array.isArray(workOrders) ? workOrders : [];
+      renderWorkOrdersTable();
+      setStatus("workorders-status", `Loaded ${currentInstrumentWorkOrders.length} work order(s).`, "ok");
+    }
+
+    async function openCreateWorkOrderModal() {
+      const dueDateInput = $("workorder-due-at");
+      if (dueDateInput) dueDateInput.value = "";
+      $("workorder-title").value = "";
+      $("workorder-priority").value = "";
+      $("workorder-description").value = "";
+      $("workorder-assigned-user-id").value = "";
+      $("modal-create-workorder")?.showModal();
+    }
+
+    async function createWorkOrder() {
+      const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
+      const equipmentId = clampInt(currentInstrumentDetail?.equipment_id, 0);
+      if (!instrumentId) return;
+
+      const title = String($("workorder-title")?.value || "").trim();
+      const priority = String($("workorder-priority")?.value || "").trim();
+      const description = String($("workorder-description")?.value || "").trim();
+      const dueAt = String($("workorder-due-at")?.value || "").trim();
+      const assignedUserId = clampInt($("workorder-assigned-user-id")?.value || 0, 0) || null;
+
+      if (!title) {
+        alert("Title is required");
+        return;
+      }
+
+      if (!priority) {
+        alert("Priority is required");
+        return;
+      }
+
+      const payload = {
+        equipment_id: equipmentId,
+        instrument_id: instrumentId,
+        title,
+        description,
+        priority,
+        assigned_user_id: assignedUserId,
+        assigned_role_id: null,
+      };
+
+      if (dueAt) {
+        payload.due_at = `${dueAt}T00:00:00Z`;
+      }
+
+      setStatus("workorders-status", "Creating work order...", "");
+      const result = await api.post("/maintenance/work_orders", payload);
+      setStatus("workorders-status", `Work order created: ${result?.work_order_code || ""}`, "ok");
+    }
+
+    function renderInstrumentDetailOverview(inst) {
+      const code = String(inst?.label || "-");
+      const name = String(inst?.meta?.name || "-");
+      const type = String(inst?.instrument_type || "-");
+      const model = String(inst?.model || "-");
+      const serial = String(inst?.serial_number || "-");
+      const status = String(inst?.status || "-");
+      const equipment = String(inst?.equipment?.name || "-");
+      const location = String(inst?.location || "-");
+      const criticality = String(inst?.meta?.criticality || "-");
+      const firstMapping = Array.isArray(inst?.mapped_datapoints) ? inst.mapped_datapoints[0] : null;
+      const mappingLabel = String(firstMapping?.label || "-");
+      const mappingRole = String(firstMapping?.role || "");
+      const mappingSummary = mappingRole ? `${mappingLabel} (${mappingRole})` : mappingLabel;
+
+      const title = $("instrument-detail-title");
+      if (title) title.textContent = `${code} + ${name}`;
+
+      setDetailValue("instrument-detail-code", code);
+      setDetailValue("instrument-detail-name", name);
+      setDetailValue("instrument-detail-type", type);
+      setDetailValue("instrument-detail-model", model);
+      setDetailValue("instrument-detail-serial", serial);
+      setDetailValue("instrument-detail-status", status);
+      setDetailValue("instrument-detail-equipment", equipment);
+      setDetailValue("instrument-detail-location", location);
+      setDetailValue("instrument-detail-criticality", criticality);
+      setDetailValue("instrument-detail-mapping", mappingSummary);
+    }
+
+    async function openInstrumentDetailModal(id) {
+      const detail = await api.get(`/maintenance/instruments/${id}`);
+      currentInstrumentDetail = detail;
+      currentInstrumentMappings = [];
+      currentInstrumentCalibrations = [];
+      currentInstrumentSpares = [];
+      currentInstrumentWorkOrders = [];
+      renderInstrumentDetailOverview(detail);
+      await populateMappingEquipmentOptions(clampInt(detail?.equipment_id, 0));
+      renderMappingSearchResults();
+      setStatus("instrument-detail-mapping-status", "", "");
+      setStatus("instrument-detail-health-status", "", "");
+      setStatus("calibration-status", "", "");
+      setStatus("spares-status", "", "");
+      setStatus("workorders-status", "", "");
+      renderHealthTabData({});
+      setInstrumentDetailTab("overview");
+      openDialog("modal-instrument-detail");
     }
 
     async function reloadAndRender() {
@@ -3028,8 +4070,18 @@
       const id = clampInt(btn.dataset.id, 0);
       if (!id) return;
       try {
+        if (action === "load-health") {
+          await loadInstrumentHealthForRow(id, true);
+          return;
+        }
+
         const base = instrumentsCache.find((x) => Number(x.id) === id) || null;
         const inst = base || (await api.get(`/maintenance/instruments/${id}`));
+
+        if (action === "view") {
+          await openInstrumentDetailModal(id);
+          return;
+        }
 
         if (action === "edit") {
           await openInstrumentModal("edit", inst);
