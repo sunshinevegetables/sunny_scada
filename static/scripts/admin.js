@@ -2626,10 +2626,19 @@
     let healthRowObserver = null;
     let pageIndex = 0;
     const PAGE_SIZE = 25;
+    // Bulk map state
+    let bulkMapInstrumentsWithoutMappings = [];
+    let bulkMapSelectedInstrumentId = null;
+    let bulkMapDatapoints = [];
+    let bulkMapAllMappings = [];
+    let bulkMapDpSearch = "";
 
     function bind() {
       const btnRefresh = $("btn-instruments-refresh");
       const btnAdd = $("btn-instruments-add");
+      const btnBulkMap = $("btn-instruments-bulk-map");
+      const bulkMapModal = $("modal-bulk-map");
+      const bulkMapDpSearchInput = $("bulk-map-dp-search");
       const form = $("form-instrument");
       const table = $("instruments-table");
       const search = $("instrument-search");
@@ -2663,7 +2672,13 @@
       btnAdd?.addEventListener("click", async () => {
         await openInstrumentModal("create");
       });
-      table?.addEventListener("click", onTableClick);
+      btnBulkMap?.addEventListener("click", async () => {
+        await openBulkMapModal();
+      });
+      bulkMapDpSearchInput?.addEventListener("input", () => {
+        bulkMapDpSearch = String($("bulk-map-dp-search")?.value || "").toLowerCase();
+        renderBulkMapDatapointsList();
+      });
       search?.addEventListener("input", () => {
         pageIndex = 0;
         applyFiltersAndRender();
@@ -2695,6 +2710,7 @@
         pageIndex += 1;
         renderTable();
       });
+      table?.addEventListener("click", onTableClick);
       detailClose?.addEventListener("click", () => closeDialog("modal-instrument-detail"));
       detailModal?.addEventListener("click", async (ev) => {
         const tabButton = ev.target.closest("button[data-tab]");
@@ -2801,6 +2817,20 @@
         const mapId = clampInt(btn.dataset.mapId, 0);
         if (!mapId) return;
         await unlinkInstrumentMapping(mapId);
+      });
+      bulkMapModal?.addEventListener("click", async (ev) => {
+        const instrBtn = ev.target.closest("button[data-bulk-instrument]");
+        if (instrBtn) {
+          const instrId = clampInt(instrBtn.dataset.bulkInstrument, 0);
+          if (instrId) selectBulkMapInstrument(instrId);
+          return;
+        }
+        const dpBtn = ev.target.closest("button[data-bulk-datapoint]");
+        if (dpBtn) {
+          const dpId = clampInt(dpBtn.dataset.bulkDatapoint, 0);
+          if (dpId) openBulkMapDpRoleSelector(dpId);
+          return;
+        }
       });
 
       if (typeof IntersectionObserver === "function") {
@@ -3920,6 +3950,201 @@
       setStatus("workorders-status", "Creating work order...", "");
       const result = await api.post("/maintenance/work_orders", payload);
       setStatus("workorders-status", `Work order created: ${result?.work_order_code || ""}`, "ok");
+    }
+
+    async function openBulkMapModal() {
+      try {
+        setStatus("bulk-map-status", "Loading instruments...", "");
+        
+        // Get all instrument mappings
+        bulkMapAllMappings = [];
+        for (const inst of instrumentsCache) {
+          const mappings = await api.get(`/maintenance/instruments/${inst.id}/datapoints`);
+          if (Array.isArray(mappings)) {
+            bulkMapAllMappings.push(...mappings.map((m) => ({ ...m, instrument_id: inst.id })));
+          }
+        }
+
+        // Filter to instruments with 0 mappings
+        bulkMapInstrumentsWithoutMappings = instrumentsCache.filter((inst) => {
+          const count = bulkMapAllMappings.filter((m) => m.instrument_id === inst.id).length;
+          return count === 0;
+        });
+
+        bulkMapSelectedInstrumentId = null;
+        bulkMapDatapoints = [];
+        bulkMapDpSearch = "";
+        $("bulk-map-dp-search").value = "";
+        
+        renderBulkMapInstrumentsList();
+        renderBulkMapDatapointsList();
+        $("modal-bulk-map")?.showModal();
+        
+        setStatus("bulk-map-status", `${bulkMapInstrumentsWithoutMappings.length} instruments ready to map`, "ok");
+      } catch (err) {
+        setStatus("bulk-map-status", err?.message || "Failed to load bulk map data", "error");
+      }
+    }
+
+    function renderBulkMapInstrumentsList() {
+      const listDiv = $("bulk-map-instruments-list");
+      if (!listDiv) return;
+      listDiv.innerHTML = "";
+
+      if (!bulkMapInstrumentsWithoutMappings.length) {
+        listDiv.appendChild(el("div", { class: "muted", style: "padding: 12px;", text: "All instruments have mappings" }, []));
+        return;
+      }
+
+      for (const inst of bulkMapInstrumentsWithoutMappings) {
+        const instrId = clampInt(inst?.id, 0);
+        const code = String(inst?.label || "-");
+        const name = String(inst?.meta?.name || "-");
+        const isSelected = instrId === bulkMapSelectedInstrumentId;
+        
+        const item = el("button", {
+          type: "button",
+          class: isSelected ? "border-bottom" : "border-bottom",
+          style: `padding: 12px; text-align: left; cursor: pointer; background-color: ${isSelected ? "var(--panel)" : "transparent"}; width: 100%;`,
+          dataset: { bulkInstrument: String(instrId) },
+          text: `${code} - ${name}`,
+        }, []);
+        
+        listDiv.appendChild(item);
+      }
+    }
+
+    function selectBulkMapInstrument(instrId) {
+      bulkMapSelectedInstrumentId = instrId;
+      const inst = bulkMapInstrumentsWithoutMappings.find((i) => i.id === instrId);
+      
+      if (!inst) return;
+
+      // Load datapoints for the instrument's equipment
+      const equipmentId = clampInt(inst?.equipment_id, 0);
+      if (!equipmentId) {
+        setStatus("bulk-map-status", "No equipment assigned", "error");
+        bulkMapDatapoints = [];
+        renderBulkMapDatapointsList();
+        return;
+      }
+
+      const cfgEq = state.cfgIndex?.get(`equipment:${equipmentId}`);
+      if (!cfgEq) {
+        setStatus("bulk-map-status", "Equipment not found in config", "error");
+        bulkMapDatapoints = [];
+        renderBulkMapDatapointsList();
+        return;
+      }
+
+      // Extract datapoints from config
+      const raw = cfgEq.raw || {};
+      bulkMapDatapoints = Array.isArray(raw.data_points)
+        ? raw.data_points.map((dp, idx) => ({
+            ...dp,
+            cfg_id: clampInt(dp?.id, idx),
+            label: String(dp?.label || "-"),
+            address: String(dp?.address || "-"),
+            type: String(dp?.type || "-"),
+          }))
+        : [];
+
+      const selectedLabel = `${String(inst?.label || "-")} (Equipment: ${String(cfgEq.name || "-")})`;
+      const selectedDiv = $("bulk-map-selected-instrument");
+      if (selectedDiv) {
+        selectedDiv.innerHTML = "";
+        selectedDiv.appendChild(el("div", { class: "strong", text: selectedLabel }, []));
+      }
+
+      renderBulkMapInstrumentsList();
+      renderBulkMapDatapointsList();
+      setStatus("bulk-map-status", `${bulkMapDatapoints.length} datapoints available`, "ok");
+    }
+
+    function renderBulkMapDatapointsList() {
+      const listDiv = $("bulk-map-datapoints-list");
+      if (!listDiv) return;
+      listDiv.innerHTML = "";
+
+      if (bulkMapSelectedInstrumentId === null) {
+        listDiv.appendChild(el("div", { class: "muted", style: "padding: 12px;", text: "Select an instrument" }, []));
+        return;
+      }
+
+      const search = bulkMapDpSearch.toLowerCase();
+      let filtered = bulkMapDatapoints;
+      if (search) {
+        filtered = filtered.filter((dp) => {
+          const label = String(dp?.label || "").toLowerCase();
+          const addr = String(dp?.address || "").toLowerCase();
+          return label.includes(search) || addr.includes(search);
+        });
+      }
+
+      if (!filtered.length) {
+        listDiv.appendChild(el("div", { class: "muted", style: "padding: 12px;", text: search ? "No datapoints match" : "No datapoints" }, []));
+        return;
+      }
+
+      for (const dp of filtered) {
+        const dpCfgId = clampInt(dp?.cfg_id, 0);
+        const label = String(dp?.label || "-");
+        const address = String(dp?.address || "-");
+        const type = String(dp?.type || "-");
+
+        // Check if already mapped to another instrument
+        const isAlreadyMapped = bulkMapAllMappings.some(
+          (m) => clampInt(m?.cfg_data_point_id, 0) === dpCfgId && m.instrument_id !== bulkMapSelectedInstrumentId
+        );
+
+        const item = el("div", { style: "padding: 8px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 4px; background-color: var(--panel);" }, [
+          el("div", { class: "strong", text: label }, []),
+          el("div", { class: "small muted", text: `${address} (${type})` }, []),
+          isAlreadyMapped &&
+            el("div", { class: "small", style: "color: var(--danger); margin-top: 4px;", text: "⚠ Already mapped to another instrument" }, []),
+          el("button", {
+            type: "button",
+            class: "btn small",
+            style: `margin-top: 4px; ${isAlreadyMapped ? "opacity: 0.6;" : ""}`,
+            dataset: { bulkDatapoint: String(dpCfgId) },
+            disabled: isAlreadyMapped,
+            text: "Map",
+          }, []),
+        ]);
+
+        listDiv.appendChild(item);
+      }
+    }
+
+    async function openBulkMapDpRoleSelector(dpCfgId) {
+      const role = prompt("Enter role (e.g., pv, alarm, status, info, setpoint):", "pv");
+      if (role === null) return;
+
+      const roleStr = String(role).trim().toLowerCase();
+      if (!roleStr) {
+        alert("Role cannot be empty");
+        return;
+      }
+
+      if (bulkMapSelectedInstrumentId && dpCfgId) {
+        await bulkMapAddMapping(bulkMapSelectedInstrumentId, dpCfgId, roleStr);
+      }
+    }
+
+    async function bulkMapAddMapping(instrId, dpCfgId, role) {
+      try {
+        setStatus("bulk-map-status", "Adding mapping...", "");
+        await api.post(`/maintenance/instruments/${instrId}/datapoints`, {
+          cfg_data_point_id: dpCfgId,
+          role: role,
+        });
+
+        // Refresh the bulk map view
+        await openBulkMapModal();
+        setStatus("bulk-map-status", `Mapping added successfully`, "ok");
+      } catch (err) {
+        setStatus("bulk-map-status", err?.message || "Failed to add mapping", "error");
+      }
     }
 
     function renderInstrumentDetailOverview(inst) {
