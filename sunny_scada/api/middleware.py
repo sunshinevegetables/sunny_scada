@@ -6,6 +6,7 @@ from starlette.responses import Response
 
 from sunny_scada.api.security import Principal, ip_in_cidrs, is_path_allowlisted
 from sunny_scada.db.models import AppClient, User
+from sunny_scada.services.auth_service import InvalidToken
 
 
 class AuthEnforcementMiddleware(BaseHTTPMiddleware):
@@ -44,11 +45,21 @@ class AuthEnforcementMiddleware(BaseHTTPMiddleware):
         SessionLocal = request.app.state.db_sessionmaker
         db = SessionLocal()  # type: ignore
         try:
-            payload = auth.decode_access_token_payload(token)
+            try:
+                payload = auth.decode_access_token_payload(token)
+            except InvalidToken:
+                from starlette.responses import JSONResponse
+
+                return JSONResponse({"detail": "Invalid token"}, status_code=401)
             prt = str(payload.get("prt") or "user")
 
             if prt == "user":
-                user_id = int(payload.get("sub"))
+                try:
+                    user_id = int(payload.get("sub"))
+                except Exception:
+                    from starlette.responses import JSONResponse
+
+                    return JSONResponse({"detail": "Invalid token"}, status_code=401)
                 user = db.query(User).filter(User.id == user_id).one_or_none()
                 if not user or not user.is_active:
                     from starlette.responses import JSONResponse
@@ -138,7 +149,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
 
         # Content Security Policy (keep it pragmatic to avoid breaking the built-in UI)
-        if request.url.path.startswith("/admin-panel"):
+        if request.url.path.startswith("/admin-panel") or "/admin/instruments" in request.url.path:
             response.headers.setdefault(
                 "Content-Security-Policy",
                 "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'",

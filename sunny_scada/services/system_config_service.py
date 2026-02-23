@@ -527,6 +527,7 @@ class SystemConfigService:
         plc_name: str,
         equipment_label: str,
         command_tag: str,
+        equipment_id: Optional[int] = None,
     ) -> Optional[CfgDataPoint]:
         """Find a write datapoint by PLC name, equipment label, and command tag (label).
 
@@ -536,19 +537,29 @@ class SystemConfigService:
         if not plc:
             return None
         
-        # We need to join container → equipment → data_point
-        # to match equipmentLabel
-        equipment = (
+        equipment_query = (
             db.query(CfgEquipment)
             .join(CfgContainer, CfgEquipment.container_id == CfgContainer.id)
-            .filter(CfgContainer.plc_id == plc.id, CfgEquipment.name == equipment_label)
-            .one_or_none()
+            .filter(CfgContainer.plc_id == plc.id)
         )
-        if not equipment:
+
+        if equipment_id is not None:
+            equipment_query = equipment_query.filter(CfgEquipment.id == int(equipment_id))
+        else:
+            equipment_query = equipment_query.filter(CfgEquipment.name == equipment_label)
+
+        equipment_rows = equipment_query.order_by(CfgEquipment.id.asc()).all()
+        if not equipment_rows:
             return None
+        if len(equipment_rows) > 1:
+            raise ValueError(
+                f"Multiple equipment matched label '{equipment_label}' in PLC '{plc_name}'. Provide equipmentId to disambiguate."
+            )
+
+        equipment = equipment_rows[0]
 
         # Find the write datapoint whose owner is this equipment & label is the command tag
-        dp = (
+        rows = (
             db.query(CfgDataPoint)
             .filter(
                 CfgDataPoint.owner_type == "equipment",
@@ -556,9 +567,16 @@ class SystemConfigService:
                 CfgDataPoint.category == "write",
                 CfgDataPoint.label == command_tag,
             )
-            .one_or_none()
+            .order_by(CfgDataPoint.id.asc())
+            .all()
         )
-        return dp
+        if not rows:
+            return None
+        if len(rows) > 1:
+            raise ValueError(
+                f"Multiple write datapoints matched tag '{command_tag}' for equipment '{equipment.name}'."
+            )
+        return rows[0]
 
     def create_data_point(
         self,

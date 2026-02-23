@@ -73,6 +73,8 @@ def is_path_allowlisted(path: str, *, env: str) -> bool:
     if path.startswith("/admin-panel"):
         # /admin-panel + /admin-panel/login are UI entrypoints
         return True
+    if "/admin/instruments" in path:
+        return True
     if path == "/favicon.ico":
         return True
 

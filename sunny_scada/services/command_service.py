@@ -105,11 +105,11 @@ class CommandService:
             if db_dp.owner_type == "equipment":
                 from sunny_scada.db.models import CfgEquipment
                 eq = db.query(CfgEquipment).filter(CfgEquipment.id == db_dp.owner_id).one_or_none()
-                equipment_label = eq.label if eq else "Unknown"
+                equipment_label = (getattr(eq, "name", None) or "Unknown") if eq else "Unknown"
             elif db_dp.owner_type == "container":
                 from sunny_scada.db.models import CfgContainer
                 ct = db.query(CfgContainer).filter(CfgContainer.id == db_dp.owner_id).one_or_none()
-                equipment_label = ct.label if ct else "Unknown"
+                equipment_label = (getattr(ct, "name", None) or "Unknown") if ct else "Unknown"
 
         payload: Dict[str, Any] = {"address": addr_i, "datapoint_label": db_dp.label, "equipment_label": equipment_label}
 

@@ -28,6 +28,7 @@ from sunny_scada.services.audit_service import AuditService
 from sunny_scada.services.data_points_service import DataPointsService
 
 router = APIRouter(tags=["plc"])
+logger = logging.getLogger(__name__)
 
 
 _INT_GROUP_RE = re.compile(r"\d+")
@@ -553,14 +554,25 @@ def bit_write_signal(
     _perm=Depends(require_permission("command:write")),
 ):
     """DB-driven bit write endpoint."""
-    
+    equipment_id: int | None = None
+    if req.equipmentId is not None and str(req.equipmentId).strip() != "":
+        try:
+            equipment_id = int(str(req.equipmentId).strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail="equipmentId must be an integer")
+
     # Look up write datapoint in DB
-    db_datapoint = sys_cfg.find_write_data_point_by_equipment(
-        db,
-        plc_name=req.plc,
-        equipment_label=req.equipmentLabel,
-        command_tag=req.commandTag,
-    )
+    try:
+        db_datapoint = sys_cfg.find_write_data_point_by_equipment(
+            db,
+            plc_name=req.plc,
+            equipment_label=req.equipmentLabel,
+            command_tag=req.commandTag,
+            equipment_id=equipment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     if not db_datapoint:
         raise HTTPException(
             status_code=400,
@@ -586,16 +598,22 @@ def bit_write_signal(
     datapoint_id = f"db-dp:{db_datapoint.id}"
     
     # Queue a secure command (non-blocking).
-    res = svc.create(
-        db,
-        plc_name=req.plc,
-        datapoint_id=datapoint_id,
-        kind="bit",
-        value=req.value,
-        bit=req.bit,
-        user_id=principal.user.id if principal.user else None,
-        client_ip=request.client.host if request.client else None,
-    )
+    try:
+        res = svc.create(
+            db,
+            plc_name=req.plc,
+            datapoint_id=datapoint_id,
+            kind="bit",
+            value=req.value,
+            bit=req.bit,
+            user_id=principal.user.id if principal.user else None,
+            client_ip=request.client.host if request.client else None,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("bit_write_signal failed")
+        raise HTTPException(status_code=400, detail=f"Failed to queue bit write: {exc}")
 
     # Traceability (audit)
     try:

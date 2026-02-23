@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instrument Registry - Admin</title>
+    <link rel="stylesheet" href="/styles/admin.css?v=20260221" />
+  </head>
+  <body class="admin-app">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-title">SCADA</div>
+          <div class="brand-sub">Admin Panel</div>
+        </div>
+
+        <nav class="nav">
+          <a href="/admin-panel#users" data-view="users" class="nav-link">Users</a>
+          <a href="/admin-panel#roles" data-view="roles" class="nav-link">Roles</a>
+          <a href="/admin-panel#plc" data-view="plc" class="nav-link">PLC Builder</a>
+          <a href="/admin-panel/instruments" data-route="/admin-panel/instruments" class="nav-link">Instruments</a>
+          <a href="/admin-panel#meta" data-view="meta" class="nav-link">Datapoint Meta</a>
+          <a href="/admin-panel#access" data-view="access" class="nav-link">Access Control</a>
+          <a href="/admin-panel#alarms" data-view="alarms" class="nav-link">Manage Alarms</a>
+          <a href="/admin-panel#alarm-log" data-view="alarm-log" class="nav-link">Alarm Log</a>
+          <a href="/admin-panel#command-log" data-view="command-log" class="nav-link">Command Log</a>
+        </nav>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="who">
+            <span class="muted">Signed in as</span>
+            <strong id="me-name">...</strong>
+          </div>
+          <div class="top-actions">
+            <button id="logout-btn" class="btn">Logout</button>
+          </div>
+        </header>
+
+        <main class="content">
+          <section id="view-instruments" class="view">
+            <div class="view-header">
+              <h2>Instrument Registry</h2>
+              <div class="actions">
+                <button id="btn-instruments-refresh" class="btn">Refresh</button>
+                <button id="btn-instruments-add" class="btn primary">Add Instrument</button>
+              </div>
+            </div>
+
+            <div class="toolbar">
+              <input id="instrument-search" class="input" placeholder="Search code / serial / datapoint label" />
+              <select id="instrument-filter-equipment" class="input">
+                <option value="">All Equipment</option>
+              </select>
+              <select id="instrument-filter-type" class="input">
+                <option value="">All Types</option>
+              </select>
+              <select id="instrument-filter-status" class="input">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="oos">OOS</option>
+                <option value="retired">Retired</option>
+              </select>
+              <select id="instrument-filter-calibration" class="input">
+                <option value="">Calibration Due (All)</option>
+                <option value="overdue">Overdue</option>
+                <option value="7d">Next 7d</option>
+                <option value="30d">Next 30d</option>
+              </select>
+            </div>
+
+            <div id="instruments-status" class="status"></div>
+
+            <div class="table-wrap">
+              <table class="table" id="instruments-table">
+                <thead>
+                  <tr>
+                    <th style="width: 130px">Instrument Code</th>
+                    <th>Name</th>
+                    <th>Equipment</th>
+                    <th style="width: 140px">Type</th>
+                    <th style="width: 200px">PV Datapoint</th>
+                    <th style="width: 120px">Health Score</th>
+                    <th style="width: 150px">Calibration Due</th>
+                    <th style="width: 130px">Spares Status</th>
+                    <th style="width: 110px">Status</th>
+                    <th class="actions-col" style="width: 220px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="row" style="margin-top: 12px">
+              <div class="muted" id="instruments-pagination">Showing 0 of 0</div>
+              <div class="actions">
+                <button class="btn small" id="btn-instruments-prev">Prev</button>
+                <button class="btn small" id="btn-instruments-next">Next</button>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="modal-instrument" class="modal">
+      <form method="dialog" class="modal-body" id="form-instrument">
+        <h3>Add Instrument</h3>
+
+        <div class="hr"></div>
+        <div class="muted">Identity</div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <label>
+            Instrument Code
+            <input name="instrument_code" required />
+          </label>
+          <label>
+            Name
+            <input name="name" />
+          </label>
+          <label>
+            Type
+            <select name="type" class="input">
+              <option value="">Select type</option>
+              <option value="pressure">Pressure</option>
+              <option value="temperature">Temperature</option>
+              <option value="flow">Flow</option>
+              <option value="level">Level</option>
+              <option value="vibration">Vibration</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Make
+            <input name="make" />
+          </label>
+          <label>
+            Model
+            <input name="model" />
+          </label>
+          <label>
+            Serial No
+            <input name="serial" />
+          </label>
+          <label>
+            Firmware
+            <input name="firmware" />
+          </label>
+        </div>
+
+        <div class="hr"></div>
+        <div class="muted">Location</div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <label>
+            Equipment
+            <select id="instrument-equipment" name="equipment_id" class="input">
+              <option value="">Select equipment</option>
+            </select>
+          </label>
+          <label>
+            Location
+            <input name="location" />
+          </label>
+          <label>
+            Criticality
+            <select name="criticality" class="input">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select name="status" class="input">
+              <option value="active" selected>Active</option>
+              <option value="oos">OOS</option>
+              <option value="retired">Retired</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="hr"></div>
+        <div class="muted">Dates</div>
+        <div class="split" style="grid-template-columns: 1fr 1fr">
+          <label>
+            Install Date
+            <input name="install_date" type="date" />
+          </label>
+          <label>
+            Commission Date
+            <input name="commission_date" type="date" />
+          </label>
+          <label>
+            Warranty Expiry
+            <input name="warranty_expiry" type="date" />
+          </label>
+        </div>
+
+        <div class="row right">
+          <button class="btn" value="cancel">Cancel</button>
+          <button class="btn primary" id="btn-instrument-save" value="default">Save</button>
+        </div>
+
+        <div id="modal-instrument-status" class="status"></div>
+      </form>
+    </dialog>
+
+    <script src="/scripts/admin.js?v=20260223"></script>
+  </body>
+</html>

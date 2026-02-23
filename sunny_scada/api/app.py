@@ -65,6 +65,7 @@ from sunny_scada.api.routers import (
     admin_alarm_rules,
     admin_alarm_log,
     frontend_alarms,
+    instruments,
 )
 from sunny_scada.api.deps import require_permission
 
@@ -439,6 +440,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         login_path = Path(static_dir) / "pages" / "admin" / "login.html"
         return FileResponse(str(login_path))
 
+    @app.get("/admin-panel/instruments", include_in_schema=False)
+    @app.get("/admin-panel/instruments/", include_in_schema=False)
+    def serve_admin_instruments_panel():
+        instruments_path = Path(static_dir) / "pages" / "admin" / "instruments.html"
+        return FileResponse(str(instruments_path))
+
+    @app.get("/admin/instruments", include_in_schema=False)
+    @app.get("/admin/instruments/", include_in_schema=False)
+    def serve_admin_instruments():
+        instruments_path = Path(static_dir) / "pages" / "admin" / "instruments.html"
+        return FileResponse(str(instruments_path))
+
     # Routers
     app.include_router(health.router)
     app.include_router(processes.router)
@@ -459,6 +472,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ws_alarms.router)
     app.include_router(ws_commands.router)
     app.include_router(maintenance.router)
+    app.include_router(instruments.router)
     app.include_router(trends.router)
 
     # System config (DB-backed PLC/Container/Equipment/Datapoints)

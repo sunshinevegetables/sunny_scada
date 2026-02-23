@@ -57,6 +57,28 @@ def _walk_points(tree: Any, *, prefix: Tuple[str, ...] = ()) -> Iterable[Tuple[T
 
 
 class HistorianService:
+    def query_samples_by_cfg_data_point_id(
+        self,
+        db: Session,
+        *,
+        cfg_data_point_id: int,
+        from_ts: dt.datetime,
+        to_ts: dt.datetime,
+        limit: Optional[int] = None,
+    ) -> List[HistorianSample]:
+        q = (
+            db.query(HistorianSample)
+            .filter(
+                HistorianSample.cfg_data_point_id == int(cfg_data_point_id),
+                HistorianSample.ts >= from_ts,
+                HistorianSample.ts <= to_ts,
+            )
+            .order_by(HistorianSample.ts.asc())
+        )
+        if limit is not None and int(limit) > 0:
+            q = q.limit(int(limit))
+        return q.all()
+
     def _resolve_query_identifier(
         self,
         db: Session,

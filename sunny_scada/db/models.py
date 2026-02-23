@@ -676,12 +676,21 @@ class Schedule(Base):
 
     task_template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("task_templates.id", ondelete="SET NULL"), nullable=True)
     equipment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"), nullable=True)
+    instrument_id: Mapped[Optional[int]] = mapped_column(ForeignKey("instruments.id", ondelete="SET NULL"), nullable=True)
 
     next_run_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
 
     task_template: Mapped[Optional[TaskTemplate]] = relationship("TaskTemplate", lazy="selectin")
     equipment: Mapped[Optional[Equipment]] = relationship("Equipment", lazy="selectin")
+    instrument: Mapped[Optional[Instrument]] = relationship("Instrument", lazy="selectin")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(equipment_id IS NOT NULL AND instrument_id IS NULL) OR (equipment_id IS NULL AND instrument_id IS NOT NULL)",
+            name="ck_schedules_target",
+        ),
+    )
 
 
 # -------- Historian --------

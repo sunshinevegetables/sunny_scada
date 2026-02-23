@@ -11,6 +11,7 @@ from sunny_scada.api.deps import get_db, get_current_user, require_permission, g
 from sunny_scada.db.models import (
     Breakdown,
     Equipment,
+    Instrument,
     InventoryTransaction,
     SparePart,
     Schedule,
@@ -24,6 +25,45 @@ router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def _instrument_summary(db: Session, instrument_id: Optional[int]) -> Optional[dict[str, Any]]:
+    if instrument_id is None:
+        return None
+    inst = db.query(Instrument).filter(Instrument.id == int(instrument_id)).one_or_none()
+    if inst is None:
+        return None
+    return {
+        "id": int(inst.id),
+        "label": str(inst.label),
+        "status": str(inst.status),
+        "instrument_type": inst.instrument_type,
+        "model": inst.model,
+    }
+
+
+def _apply_inventory_delta(
+    db: Session,
+    *,
+    part: SparePart,
+    qty_delta: int,
+    reason: Optional[str],
+    work_order_id: Optional[int],
+    user_id: Optional[int],
+    client_ip: Optional[str],
+) -> InventoryTransaction:
+    part.quantity_on_hand = int(part.quantity_on_hand or 0) + int(qty_delta)
+    txn = InventoryTransaction(
+        part_id=int(part.id),
+        qty_delta=int(qty_delta),
+        reason=reason,
+        work_order_id=work_order_id,
+        user_id=user_id,
+        client_ip=client_ip,
+    )
+    db.add(part)
+    db.add(txn)
+    return txn
 
 
 # ---------- Vendors ----------
@@ -414,17 +454,15 @@ def adjust_inventory(
     part = db.query(SparePart).filter(SparePart.id == part_id).one_or_none()
     if not part:
         raise HTTPException(status_code=404, detail="Not found")
-    part.quantity_on_hand = int(part.quantity_on_hand or 0) + int(req.qty_delta)
-    txn = InventoryTransaction(
-        part_id=part.id,
+    _apply_inventory_delta(
+        db,
+        part=part,
         qty_delta=int(req.qty_delta),
         reason=req.reason,
         work_order_id=req.work_order_id,
         user_id=user.id,
         client_ip=request.client.host if request.client else None,
     )
-    db.add(part)
-    db.add(txn)
     db.commit()
 
     try:
@@ -605,7 +643,13 @@ class ScheduleIn(BaseModel):
     interval_minutes: Optional[int] = None
     task_template_id: Optional[int] = None
     equipment_id: Optional[int] = None
+    instrument_id: Optional[int] = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+def _validate_schedule_target(equipment_id: Optional[int], instrument_id: Optional[int]) -> None:
+    if (equipment_id is None) == (instrument_id is None):
+        raise HTTPException(status_code=400, detail="Provide exactly one of equipment_id or instrument_id")
 
 
 @router.post("/schedules")
@@ -617,6 +661,7 @@ def create_schedule(
     audit=Depends(get_audit_service),
     _perm=Depends(require_permission("maintenance:write")),
 ):
+    _validate_schedule_target(req.equipment_id, req.instrument_id)
     sch = Schedule(
         name=req.name,
         enabled=req.enabled,
@@ -624,6 +669,7 @@ def create_schedule(
         interval_minutes=req.interval_minutes,
         task_template_id=req.task_template_id,
         equipment_id=req.equipment_id,
+        instrument_id=req.instrument_id,
         next_run_at=_now(),
         meta=req.meta,
     )
@@ -642,7 +688,7 @@ def list_schedules(
     _perm=Depends(require_permission("maintenance:read")),
 ):
     rows = db.query(Schedule).order_by(Schedule.id.asc()).all()
-    return [{"id": s.id, "name": s.name, "enabled": s.enabled, "cron": s.cron, "interval_minutes": s.interval_minutes, "next_run_at": s.next_run_at, "equipment_id": s.equipment_id, "task_template_id": s.task_template_id, "meta": s.meta} for s in rows]
+    return [{"id": s.id, "name": s.name, "enabled": s.enabled, "cron": s.cron, "interval_minutes": s.interval_minutes, "next_run_at": s.next_run_at, "equipment_id": s.equipment_id, "instrument_id": s.instrument_id, "task_template_id": s.task_template_id, "meta": s.meta} for s in rows]
 
 
 @router.put("/schedules/{schedule_id}")
@@ -655,6 +701,7 @@ def update_schedule(
     audit=Depends(get_audit_service),
     _perm=Depends(require_permission("maintenance:write")),
 ):
+    _validate_schedule_target(req.equipment_id, req.instrument_id)
     sch = db.query(Schedule).filter(Schedule.id == schedule_id).one_or_none()
     if not sch:
         raise HTTPException(status_code=404, detail="Not found")
@@ -664,6 +711,7 @@ def update_schedule(
     sch.interval_minutes = req.interval_minutes
     sch.task_template_id = req.task_template_id
     sch.equipment_id = req.equipment_id
+    sch.instrument_id = req.instrument_id
     sch.meta = req.meta
     if sch.next_run_at is None:
         sch.next_run_at = _now()
@@ -703,6 +751,7 @@ def delete_schedule(
 
 class WorkOrderIn(BaseModel):
     equipment_id: Optional[int] = None
+    instrument_id: Optional[int] = None
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = None
     priority: str = Field(default="normal", max_length=30)
@@ -725,6 +774,7 @@ def create_work_order(
     wo = WorkOrder(
         work_order_code="",
         equipment_id=req.equipment_id,
+        instrument_id=req.instrument_id,
         title=req.title,
         description=req.description,
         status="open",
@@ -752,14 +802,33 @@ def create_work_order(
 def list_work_orders(
     db: Session = Depends(get_db),
     _perm=Depends(require_permission("maintenance:read")),
+    instrument_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = Query(100, ge=1, le=200),
 ):
     q = db.query(WorkOrder)
+    if instrument_id is not None:
+        q = q.filter(WorkOrder.instrument_id == int(instrument_id))
     if status:
         q = q.filter(WorkOrder.status == status)
     rows = q.order_by(WorkOrder.created_at.desc()).limit(limit).all()
-    return [{"id": w.id, "work_order_code": w.work_order_code, "equipment_id": w.equipment_id, "status": w.status, "priority": w.priority, "title": w.title, "created_at": w.created_at, "due_at": w.due_at, "assigned_user_id": w.assigned_user_id, "assigned_role_id": w.assigned_role_id} for w in rows]
+    return [
+        {
+            "id": w.id,
+            "work_order_code": w.work_order_code,
+            "equipment_id": w.equipment_id,
+            "instrument_id": w.instrument_id,
+            "instrument": _instrument_summary(db, w.instrument_id),
+            "status": w.status,
+            "priority": w.priority,
+            "title": w.title,
+            "created_at": w.created_at,
+            "due_at": w.due_at,
+            "assigned_user_id": w.assigned_user_id,
+            "assigned_role_id": w.assigned_role_id,
+        }
+        for w in rows
+    ]
 
 
 @router.get("/work_orders/{work_order_id}")
@@ -771,11 +840,36 @@ def get_work_order(
     w = db.query(WorkOrder).filter(WorkOrder.id == work_order_id).one_or_none()
     if not w:
         raise HTTPException(status_code=404, detail="Not found")
-    return {"id": w.id, "work_order_code": w.work_order_code, "equipment_id": w.equipment_id, "status": w.status, "priority": w.priority, "title": w.title, "description": w.description, "created_at": w.created_at, "due_at": w.due_at, "assigned_user_id": w.assigned_user_id, "assigned_role_id": w.assigned_role_id, "meta": w.meta}
+    return {
+        "id": w.id,
+        "work_order_code": w.work_order_code,
+        "equipment_id": w.equipment_id,
+        "instrument_id": w.instrument_id,
+        "instrument": _instrument_summary(db, w.instrument_id),
+        "status": w.status,
+        "priority": w.priority,
+        "title": w.title,
+        "description": w.description,
+        "created_at": w.created_at,
+        "due_at": w.due_at,
+        "assigned_user_id": w.assigned_user_id,
+        "assigned_role_id": w.assigned_role_id,
+        "meta": w.meta,
+    }
 
 
 class StatusChange(BaseModel):
     status: str = Field(min_length=1, max_length=30)
+
+
+class WorkOrderPartUsed(BaseModel):
+    part_id: int
+    qty_used: int = Field(gt=0)
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class WorkOrderStatusChange(StatusChange):
+    parts_used: Optional[list[WorkOrderPartUsed]] = None
 
 
 _ALLOWED = {
@@ -789,7 +883,7 @@ _ALLOWED = {
 @router.post("/work_orders/{work_order_id}/status")
 def set_work_order_status(
     work_order_id: int,
-    req: StatusChange,
+    req: WorkOrderStatusChange,
     request: Request,
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -803,6 +897,22 @@ def set_work_order_status(
     cur = w.status
     if new != cur and new not in _ALLOWED.get(cur, set()):
         raise HTTPException(status_code=400, detail="Invalid status transition")
+
+    if new == "done" and req.parts_used:
+        for item in req.parts_used:
+            part = db.query(SparePart).filter(SparePart.id == int(item.part_id)).one_or_none()
+            if not part:
+                raise HTTPException(status_code=404, detail=f"Part not found: {item.part_id}")
+            _apply_inventory_delta(
+                db,
+                part=part,
+                qty_delta=-int(item.qty_used),
+                reason=item.reason or "issue",
+                work_order_id=w.id,
+                user_id=user.id,
+                client_ip=request.client.host if request.client else None,
+            )
+
     w.status = new
     if new in ("done", "cancelled"):
         w.closed_at = _now()
@@ -818,6 +928,7 @@ def set_work_order_status(
 
 
 class WorkOrderUpdate(BaseModel):
+    instrument_id: Optional[int] = None
     title: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
     priority: Optional[str] = Field(default=None, max_length=30)
@@ -842,6 +953,8 @@ def update_work_order(
         raise HTTPException(status_code=404, detail="Not found")
     if req.title is not None:
         w.title = req.title
+    if req.instrument_id is not None:
+        w.instrument_id = req.instrument_id
     if req.description is not None:
         w.description = req.description
     if req.priority is not None:
@@ -912,17 +1025,15 @@ def use_part(
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
 
-    part.quantity_on_hand = int(part.quantity_on_hand or 0) - int(req.qty_used)
-    txn = InventoryTransaction(
-        part_id=part.id,
+    _apply_inventory_delta(
+        db,
+        part=part,
         qty_delta=-int(req.qty_used),
         reason=req.reason or "issue",
         work_order_id=w.id,
         user_id=user.id,
         client_ip=request.client.host if request.client else None,
     )
-    db.add(part)
-    db.add(txn)
     db.commit()
 
     try:

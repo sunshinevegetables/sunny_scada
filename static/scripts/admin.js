@@ -276,6 +276,9 @@
     cfgIndex: new Map(), // key -> { key, type, id, name, parentKey, raw }
     cfgCollapsed: new Set(),
     cfgSelectedKey: null,
+    datapointInstrumentLinksByEquipment: new Map(),
+    datapointInstrumentLinkLoading: new Set(),
+    mappedInstrumentIds: new Set(),
 
     meta: {
       classes: [],
@@ -367,7 +370,9 @@
   function setActiveNav(view) {
     document.querySelectorAll(".nav-link").forEach((a) => {
       const v = a.getAttribute("data-view");
-      a.classList.toggle("active", v === view);
+      const route = a.getAttribute("data-route");
+      const routeActive = !v && route && window.location.pathname === route;
+      a.classList.toggle("active", v === view || routeActive);
     });
   }
 
@@ -430,6 +435,7 @@
     if (target === "users") await usersView.show();
     if (target === "roles") await rolesView.show();
     if (target === "plc") await plcView.show();
+    if (target === "instruments") await instrumentsView.show();
     if (target === "meta") await metaView.show();
     if (target === "alarms") await alarmsView.show();
     if (target === "access") await accessView.show(query);
@@ -1387,6 +1393,8 @@
   // -----------------------------
   const plcView = (() => {
     let initialized = false;
+    let dpLinkContext = null;
+    let dpLinkResults = [];
 
     function bind() {
       $("btn-plc-refresh")?.addEventListener("click", () => loadTree(true));
@@ -1428,6 +1436,263 @@
         ev.preventDefault();
         await submitChildForm();
       });
+
+      $("btn-dp-link-search")?.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        await searchInstrumentsForDatapointLink();
+      });
+
+      $("dp-link-search")?.addEventListener("input", () => {
+        renderDatapointLinkSelect(dpLinkResults);
+      });
+
+      $("form-link-instrument")?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await saveDatapointInstrumentLink();
+      });
+    }
+
+    function getSelectedEquipmentInfo() {
+      if (!state.cfgSelectedKey) return null;
+      const info = state.cfgIndex.get(state.cfgSelectedKey);
+      if (!info || info.type !== "equipment") return null;
+      return info;
+    }
+
+    function populateDatapointLinkSelect(items) {
+      const sel = $("dp-link-instrument");
+      if (!sel) return;
+      const list = Array.isArray(items) ? items : [];
+      const currentInstrumentId = clampInt(dpLinkContext?.current?.instrumentId, 0);
+
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: list.length ? "Select instrument" : "No instruments found" }));
+      for (const inst of list) {
+        const instrumentId = clampInt(inst.id, 0);
+        if (!instrumentId) continue;
+        const code = String(inst.label || "").trim();
+        const name = String(inst.meta?.name || "").trim();
+        const serial = String(inst.serial_number || "").trim();
+        const text = [code, name, serial ? `SN:${serial}` : ""].filter(Boolean).join(" • ");
+        sel.appendChild(el("option", { value: String(instrumentId), text }));
+      }
+      sel.disabled = list.length === 0;
+      if (currentInstrumentId) sel.value = String(currentInstrumentId);
+    }
+
+    function renderDatapointLinkSelect(sourceItems) {
+      const term = String($("dp-link-search")?.value || "").trim().toLowerCase();
+      const items = Array.isArray(sourceItems) ? sourceItems : [];
+      if (!term) {
+        populateDatapointLinkSelect(items);
+        return;
+      }
+      const filtered = items.filter((inst) => {
+        const code = String(inst.label || "").toLowerCase();
+        const name = String(inst.meta?.name || "").toLowerCase();
+        const serial = String(inst.serial_number || "").toLowerCase();
+        const type = String(inst.instrument_type || "").toLowerCase();
+        const model = String(inst.model || "").toLowerCase();
+        const location = String(inst.location || "").toLowerCase();
+        return (
+          code.includes(term) ||
+          name.includes(term) ||
+          serial.includes(term) ||
+          type.includes(term) ||
+          model.includes(term) ||
+          location.includes(term)
+        );
+      });
+      populateDatapointLinkSelect(filtered);
+    }
+
+    async function searchInstrumentsForDatapointLink() {
+      if (!dpLinkContext?.equipmentId) return;
+      const eqId = clampInt(dpLinkContext.equipmentId, 0);
+      const searchText = String($("dp-link-search")?.value || "").trim();
+
+      setStatus("modal-link-instrument-status", "Searching instruments...", "");
+      try {
+        await refreshDatapointInstrumentLinks(eqId, false);
+
+        const query = { equipment_id: eqId };
+        if (searchText) query.q = searchText;
+        const rows = await api.get("/maintenance/instruments", { query });
+        dpLinkResults = Array.isArray(rows) ? rows : [];
+
+        if (!dpLinkResults.length) {
+          const fallbackQuery = {};
+          if (searchText) fallbackQuery.q = searchText;
+          const fallbackRows = await api.get("/maintenance/instruments", { query: fallbackQuery });
+          dpLinkResults = Array.isArray(fallbackRows) ? fallbackRows : [];
+        }
+
+        const mappedIds = state.mappedInstrumentIds || new Set();
+        dpLinkResults = dpLinkResults.filter((inst) => !mappedIds.has(clampInt(inst.id, 0)));
+
+        // API already applies q filtering; render returned rows directly to avoid client-side over-filtering.
+        populateDatapointLinkSelect(dpLinkResults);
+        setStatus("modal-link-instrument-status", `Found ${dpLinkResults.length} instrument(s).`, "ok");
+      } catch (err) {
+        dpLinkResults = [];
+        populateDatapointLinkSelect([]);
+        setStatus("modal-link-instrument-status", err?.message || "Failed to search instruments", "error");
+      }
+    }
+
+    async function saveDatapointInstrumentLink() {
+      const eqId = clampInt(dpLinkContext?.equipmentId, 0);
+      const dpId = clampInt(dpLinkContext?.datapointId, 0);
+      const selectedInstrumentId = clampInt($("dp-link-instrument")?.value || 0, 0);
+      if (!eqId || !dpId) return;
+      if (!selectedInstrumentId) {
+        setStatus("modal-link-instrument-status", "Select an instrument.", "error");
+        return;
+      }
+
+      setStatus("modal-link-instrument-status", "Linking...", "");
+      try {
+        const currentMap = state.datapointInstrumentLinksByEquipment.get(eqId)?.get(dpId) || null;
+
+        const selectedMappingsResp = await api.get(`/maintenance/instruments/${selectedInstrumentId}/datapoints`);
+        const selectedMappings = Array.isArray(selectedMappingsResp) ? selectedMappingsResp : [];
+
+        for (const mapping of selectedMappings) {
+          const mapId = clampInt(mapping.id, 0);
+          const mappedDp = clampInt(mapping.cfg_data_point_id, 0);
+          if (!mapId) continue;
+          if (mappedDp !== dpId) {
+            await api.delete(`/maintenance/instruments/${selectedInstrumentId}/datapoints/${mapId}`);
+          }
+        }
+
+        if (currentMap && clampInt(currentMap.instrumentId, 0) !== selectedInstrumentId && clampInt(currentMap.mapId, 0)) {
+          await api.delete(`/maintenance/instruments/${clampInt(currentMap.instrumentId, 0)}/datapoints/${clampInt(currentMap.mapId, 0)}`);
+        }
+
+        const exactExists = selectedMappings.some((m) => clampInt(m.cfg_data_point_id, 0) === dpId);
+        if (!exactExists || (currentMap && clampInt(currentMap.instrumentId, 0) !== selectedInstrumentId)) {
+          await api.post(`/maintenance/instruments/${selectedInstrumentId}/datapoints`, {
+            json: {
+              cfg_data_point_id: dpId,
+              role: "process",
+            },
+          });
+        }
+
+        setStatus("modal-link-instrument-status", "Instrument linked successfully.", "ok");
+        toast("Instrument linked");
+        closeDialog("modal-link-instrument");
+        await refreshDatapointInstrumentLinks(eqId, true);
+      } catch (err) {
+        setStatus("modal-link-instrument-status", err?.message || "Failed to link instrument", "error");
+      }
+    }
+
+    async function unlinkDatapointInstrumentLink(eqId, dpId) {
+      const links = state.datapointInstrumentLinksByEquipment.get(eqId) || new Map();
+      const currentMap = links.get(dpId) || null;
+      if (!currentMap) return;
+
+      const instrumentCode = String(currentMap.instrumentCode || `#${currentMap.instrumentId}`);
+      if (!confirmDanger(`Unlink instrument '${instrumentCode}' from this data point?`)) return;
+
+      try {
+        await api.delete(`/maintenance/instruments/${clampInt(currentMap.instrumentId, 0)}/datapoints/${clampInt(currentMap.mapId, 0)}`);
+        toast("Instrument unlinked");
+        await refreshDatapointInstrumentLinks(eqId, true);
+      } catch (err) {
+        toast(err?.message || "Failed to unlink instrument", "error");
+      }
+    }
+
+    async function openDatapointLinkModal(eqInfo, datapoint) {
+      const eqId = clampInt(eqInfo?.id, 0);
+      const dpId = clampInt(datapoint?.id, 0);
+      if (!eqId || !dpId) return;
+
+      const currentMap = state.datapointInstrumentLinksByEquipment.get(eqId)?.get(dpId) || null;
+      dpLinkContext = {
+        equipmentId: eqId,
+        datapointId: dpId,
+        datapointLabel: String(datapoint?.label || `DataPoint #${dpId}`),
+        current: currentMap,
+      };
+
+      const label = $("dp-link-datapoint-label");
+      if (label) label.value = dpLinkContext.datapointLabel;
+      const current = $("dp-link-current");
+      if (current) {
+        current.textContent = currentMap ? `${currentMap.instrumentCode} — ${currentMap.instrumentName || ""}` : "Not linked";
+      }
+
+      const search = $("dp-link-search");
+      if (search) search.value = "";
+      setStatus("modal-link-instrument-status", "", "");
+
+      openDialog("modal-link-instrument");
+      await searchInstrumentsForDatapointLink();
+    }
+
+    async function refreshDatapointInstrumentLinks(eqId, force = false) {
+      if (!force && state.datapointInstrumentLinksByEquipment.has(eqId)) return state.datapointInstrumentLinksByEquipment.get(eqId);
+      if (state.datapointInstrumentLinkLoading.has(eqId)) return state.datapointInstrumentLinksByEquipment.get(eqId);
+
+      state.datapointInstrumentLinkLoading.add(eqId);
+      try {
+        const eqInfo = state.cfgIndex.get(`equipment:${eqId}`);
+        const eqDatapointIds = new Set(
+          (Array.isArray(eqInfo?.raw?.datapoints) ? eqInfo.raw.datapoints : [])
+            .map((dp) => clampInt(dp.id, 0))
+            .filter((id) => id > 0)
+        );
+
+        const instruments = await api.get("/maintenance/instruments");
+        const list = Array.isArray(instruments) ? instruments : [];
+        const mapByDp = new Map();
+        const mappedInstrumentIds = new Set();
+
+        await Promise.all(
+          list.map(async (inst) => {
+            const instrumentId = clampInt(inst.id, 0);
+            let mappings = [];
+            try {
+              const mapRows = await api.get(`/maintenance/instruments/${instrumentId}/datapoints`);
+              mappings = Array.isArray(mapRows) ? mapRows : [];
+            } catch {
+              mappings = [];
+            }
+
+            for (const mapping of mappings) {
+              const dpId = clampInt(mapping.cfg_data_point_id, 0);
+              if (!dpId) continue;
+              mappedInstrumentIds.add(instrumentId);
+              if (!eqDatapointIds.has(dpId) || mapByDp.has(dpId)) continue;
+              mapByDp.set(dpId, {
+                instrumentId,
+                instrumentCode: String(inst.label || ""),
+                instrumentName: String(inst.meta?.name || ""),
+                mapId: clampInt(mapping.id, 0),
+                role: String(mapping.role || ""),
+              });
+            }
+          })
+        );
+
+        state.mappedInstrumentIds = mappedInstrumentIds;
+        state.datapointInstrumentLinksByEquipment.set(eqId, mapByDp);
+      } catch (err) {
+        console.error("Failed to refresh datapoint links:", err);
+        state.mappedInstrumentIds = new Set();
+        state.datapointInstrumentLinksByEquipment.set(eqId, new Map());
+      } finally {
+        state.datapointInstrumentLinkLoading.delete(eqId);
+      }
+
+      const selected = getSelectedEquipmentInfo();
+      if (selected && clampInt(selected.id, 0) === eqId) renderDetails();
+
+      return state.datapointInstrumentLinksByEquipment.get(eqId) || new Map();
     }
 
     async function show() {
@@ -1757,6 +2022,12 @@
     function renderDatapointsSection(info) {
       const node = info.raw;
       const dps = node.datapoints || [];
+      const isEquipment = info.type === "equipment";
+      const eqId = clampInt(info.id, 0);
+      if (isEquipment && eqId && !state.datapointInstrumentLinksByEquipment.has(eqId) && !state.datapointInstrumentLinkLoading.has(eqId)) {
+        refreshDatapointInstrumentLinks(eqId, true).catch(() => {});
+      }
+      const linksByDp = isEquipment ? state.datapointInstrumentLinksByEquipment.get(eqId) || new Map() : new Map();
 
       const section = el("div", { style: "margin-top: 14px;" }, []);
       section.appendChild(
@@ -1782,6 +2053,7 @@
             el("th", { text: "Cat" }),
             el("th", { text: "Type" }),
             el("th", { text: "Address" }),
+            el("th", { text: "Linked Instrument" }),
             el("th", { text: "" }),
           ]),
         ])
@@ -1789,9 +2061,13 @@
 
       const tbody = el("tbody");
       if (!dps.length) {
-        tbody.appendChild(el("tr", {}, [el("td", { colspan: "6", class: "muted", text: "No datapoints on this node." })]));
+        tbody.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "muted", text: "No datapoints on this node." })]));
       } else {
         for (const dp of dps) {
+          const dpId = clampInt(dp.id, 0);
+          const link = linksByDp.get(dpId) || null;
+          const linkedText = link ? `${link.instrumentCode}${link.instrumentName ? ` — ${link.instrumentName}` : ""}` : "—";
+
           const actions = el("div", { class: "actions-group" }, [
             el("button", {
               class: "btn small",
@@ -1805,6 +2081,18 @@
                   type: "button",
                   text: "Duplicate",
                   onclick: () => openChildModal({ childType: "datapoint", parentType: info.type, parentId: info.id, mode: "duplicate", existing: dp }),
+                })
+              : null,
+            can(state.perms, "config:write")
+              ? el("button", {
+                  class: `btn small ${link ? "danger" : "primary"}`,
+                  type: "button",
+                  text: link ? "Unlink" : "Link",
+                  disabled: !isEquipment ? "true" : null,
+                  onclick: () =>
+                    link
+                      ? unlinkDatapointInstrumentLink(eqId, dpId)
+                      : openDatapointLinkModal(info, dp),
                 })
               : null,
             can(state.perms, "config:write")
@@ -1824,6 +2112,10 @@
               el("td", { text: String(dp.category || "") }),
               el("td", { text: String(dp.type || "") }),
               el("td", { text: String(dp.address || "") }),
+              el("td", {}, [
+                el("div", { text: linkedText }),
+                link ? el("span", { class: "badge ok", text: String(link.role || "process").toUpperCase() }) : null,
+              ]),
               el("td", { class: "actions-col" }, [actions]),
             ])
           );
@@ -2250,6 +2542,350 @@
         }
       }
       renderDetails();
+    }
+
+    return { show };
+  })();
+
+  // Shared utility: ensure config tree is loaded
+  async function ensureConfigTreeLoaded() {
+    if (state.cfgTree.length) return;
+    try {
+      const tree = await api.get("/api/config/tree");
+      state.cfgTree = Array.isArray(tree) ? tree : [];
+      plcView && plcView.show; // noop - keep linter quiet
+      // build index for name lookups
+      // reuse plc view indexer logic
+      // (duplicated small part to avoid tight coupling)
+      state.cfgIndex = new Map();
+      const add = (type, raw, parentKey = null) => {
+        const id = clampInt(raw.id, 0);
+        const key = `${type}:${id}`;
+        const name =
+          type === "plc"
+            ? raw.name
+            : type === "container"
+            ? raw.name
+            : type === "equipment"
+            ? raw.name
+            : type === "datapoint"
+            ? raw.label
+            : String(raw.name || raw.label || "");
+        state.cfgIndex.set(key, { key, type, id, name, parentKey, raw });
+        return key;
+      };
+      for (const plc of state.cfgTree) {
+        const plcKey = add("plc", plc, null);
+        for (const dp of plc.datapoints || []) add("datapoint", dp, plcKey);
+        for (const c of plc.containers || []) {
+          const cKey = add("container", c, plcKey);
+          for (const dp of c.datapoints || []) add("datapoint", dp, cKey);
+          for (const e of c.equipment || []) {
+            const eKey = add("equipment", e, cKey);
+            for (const dp of e.datapoints || []) add("datapoint", dp, eKey);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load configuration tree:", err);
+    }
+  }
+
+  // -----------------------------
+  // Instruments view (UI-only)
+  // -----------------------------
+  const instrumentsView = (() => {
+    let initialized = false;
+    let editingInstrumentId = null;
+    let instrumentsCache = [];
+
+    function bind() {
+      const btnRefresh = $("btn-instruments-refresh");
+      const btnAdd = $("btn-instruments-add");
+      const form = $("form-instrument");
+      const table = $("instruments-table");
+
+      btnRefresh?.addEventListener("click", () => render());
+      btnAdd?.addEventListener("click", async () => {
+        await openInstrumentModal("create");
+      });
+      table?.addEventListener("click", onTableClick);
+
+      form?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const label = String(form.instrument_code?.value || "").trim();
+        if (!label) {
+          setStatus("modal-instrument-status", "Instrument code is required.", "error");
+          return;
+        }
+        try {
+          setStatus("modal-instrument-status", "Saving...", "");
+          const payload = buildInstrumentPayload(form);
+          console.log("Submitting instrument payload:", payload);
+          if (editingInstrumentId) {
+            await api.put(`/maintenance/instruments/${editingInstrumentId}`, { json: payload });
+          } else {
+            await api.post("/maintenance/instruments", { json: payload });
+          }
+          setStatus("modal-instrument-status", "Saved successfully!", "ok");
+          closeDialog("modal-instrument");
+          form.reset();
+          editingInstrumentId = null;
+          // Reload instruments list
+          render();
+        } catch (err) {
+          console.error("Instrument save error:", err);
+          setStatus("modal-instrument-status", err?.message || "Failed to save instrument", "error");
+        }
+      });
+    }
+
+    async function populateInstrumentEquipment() {
+      const sel = $("instrument-equipment");
+      if (!sel) return;
+      try {
+        // Try loading from maintenance Equipment table first
+        let equipment = await api.get("/maintenance/equipment");
+        if (!Array.isArray(equipment) || equipment.length === 0) {
+          console.log("Equipment table empty, using config tree fallback");
+          // Fall back to config tree if Equipment table is empty
+          await ensureConfigTreeLoaded();
+          equipment = [];
+          if (state.cfgTree && Array.isArray(state.cfgTree)) {
+            for (const plc of state.cfgTree) {
+              const plcName = String(plc.name || "PLC");
+              const containers = Array.isArray(plc.containers) ? plc.containers : [];
+              for (const c of containers) {
+                const cName = String(c.name || "Container");
+                const equipmentList = Array.isArray(c.equipment) ? c.equipment : [];
+                for (const e of equipmentList) {
+                  equipment.push({
+                    id: clampInt(e.id, 0),
+                    name: `${e.name || "Equipment"} (${plcName} / ${cName})`,
+                    equipment_code: "",
+                    location: "",
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        sel.innerHTML = "";
+        sel.appendChild(el("option", { value: "", text: "Select equipment" }));
+        for (const eq of equipment) {
+          const id = clampInt(eq.id, 0);
+          const name = String(eq.name || "");
+          sel.appendChild(el("option", { value: String(id), text: name }));
+        }
+      } catch (err) {
+        console.error("Failed to load equipment:", err);
+        setStatus("modal-instrument-status", `Failed to load equipment: ${err?.message || ""}`, "error");
+      }
+    }
+
+    function buildInstrumentPayload(form) {
+      const equipmentIdStr = String(form.equipment_id?.value || "").trim();
+      const equipmentId = equipmentIdStr && equipmentIdStr !== "0" ? clampInt(equipmentIdStr, 0) : null;
+      return {
+        label: String(form.instrument_code?.value || "").trim(),
+        status: String(form.status?.value || "active").trim(),
+        equipment_id: equipmentId,
+        instrument_type: String(form.type?.value || "").trim() || null,
+        model: String(form.model?.value || "").trim() || null,
+        serial_number: String(form.serial?.value || "").trim() || null,
+        location: String(form.location?.value || "").trim() || null,
+        installed_at: form.install_date?.value || null,
+        notes: String(form.make?.value || "") + (form.firmware?.value ? ` | FW: ${form.firmware.value}` : ""),
+        meta: {
+          name: String(form.name?.value || "").trim() || null,
+          make: String(form.make?.value || "").trim() || null,
+          firmware: String(form.firmware?.value || "").trim() || null,
+          criticality: String(form.criticality?.value || "medium").trim(),
+          commission_date: form.commission_date?.value || null,
+          warranty_expiry: form.warranty_expiry?.value || null,
+        },
+      };
+    }
+
+    function toDateInputValue(value) {
+      if (!value) return "";
+      const text = String(value);
+      return text.length >= 10 ? text.slice(0, 10) : text;
+    }
+
+    async function openInstrumentModal(mode, inst = null) {
+      const form = $("form-instrument");
+      const modalTitle = qs("h3", $("modal-instrument"));
+      const saveButton = $("btn-instrument-save");
+      if (!form) return;
+
+      editingInstrumentId = mode === "edit" ? clampInt(inst?.id, 0) : null;
+      form.reset();
+      setStatus("modal-instrument-status", "", "");
+
+      if (modalTitle) {
+        modalTitle.textContent = mode === "edit" ? "Edit Instrument" : mode === "duplicate" ? "Duplicate Instrument" : "Add Instrument";
+      }
+      if (saveButton) {
+        saveButton.textContent = mode === "edit" ? "Update" : "Save";
+      }
+
+      openDialog("modal-instrument");
+      await populateInstrumentEquipment();
+
+      if (!inst) return;
+
+      form.instrument_code.value = mode === "duplicate" ? `${String(inst.label || "")}-COPY` : String(inst.label || "");
+      form.name.value = String(inst.meta?.name || "");
+      form.type.value = String(inst.instrument_type || "");
+      form.make.value = String(inst.meta?.make || "");
+      form.model.value = String(inst.model || "");
+      form.serial.value = String(inst.serial_number || "");
+      form.firmware.value = String(inst.meta?.firmware || "");
+      form.equipment_id.value = inst.equipment_id != null ? String(inst.equipment_id) : "";
+      form.location.value = String(inst.location || "");
+      form.criticality.value = String(inst.meta?.criticality || "medium");
+      form.status.value = String(inst.status || "active");
+      form.install_date.value = toDateInputValue(inst.installed_at);
+      form.commission_date.value = toDateInputValue(inst.meta?.commission_date);
+      form.warranty_expiry.value = toDateInputValue(inst.meta?.warranty_expiry);
+    }
+
+    async function onTableClick(ev) {
+      const btn = ev.target.closest("button[data-action]");
+      if (!btn) return;
+
+      const action = String(btn.dataset.action || "").trim();
+      const id = clampInt(btn.dataset.id, 0);
+      if (!id) return;
+      try {
+        const base = instrumentsCache.find((x) => Number(x.id) === id) || null;
+        const inst = base || (await api.get(`/maintenance/instruments/${id}`));
+
+        if (action === "edit") {
+          await openInstrumentModal("edit", inst);
+          return;
+        }
+
+        if (action === "duplicate") {
+          await openInstrumentModal("duplicate", inst);
+          return;
+        }
+
+        if (action === "delete") {
+          const label = String(inst?.label || `#${id}`);
+          if (!confirmDanger(`Delete instrument '${label}'?`)) return;
+          await api.delete(`/maintenance/instruments/${id}`);
+          toast("Instrument deleted");
+          await render();
+        }
+      } catch (err) {
+        toast(err?.message || "Instrument action failed", "error");
+      }
+    }
+
+    async function render() {
+      const tableBody = $("instruments-table")?.querySelector("tbody");
+      const pagination = $("instruments-pagination");
+      if (!tableBody) return;
+      try {
+        setStatus("instruments-status", "Loading...", "");
+        console.log("Fetching instruments...");
+        const instruments = await api.get("/maintenance/instruments");
+        console.log("Instruments response:", instruments);
+        if (!Array.isArray(instruments)) {
+          instrumentsCache = [];
+          setStatus("instruments-status", "No instruments found.", "");
+          tableBody.innerHTML = "";
+          if (pagination) pagination.textContent = "Showing 0 of 0";
+          return;
+        }
+        instrumentsCache = instruments;
+        tableBody.innerHTML = "";
+        for (const inst of instruments) {
+          try {
+            const id = clampInt(inst.id, 0);
+            const code = String(inst.label || "");
+            const name = String(inst.meta?.name || "");
+            const equipmentName = String(inst.equipment?.name || "-");
+            const type = String(inst.instrument_type || "");
+            const pvDatapoint = String(inst.mapped_datapoints?.[0]?.label || "-");
+            const healthScore = String(inst.meta?.health_score ?? "-");
+            const calibrationDue = String(inst.meta?.calibration_due || "-");
+            const sparesStatus = String(inst.meta?.spares_status || "-");
+            const status = String(inst.status || "");
+
+            const row = el("tr", {}, [
+              el("td", { text: code }),
+              el("td", { text: name }),
+              el("td", { text: equipmentName }),
+              el("td", { text: type }),
+              el("td", { text: pvDatapoint }),
+              el("td", { text: healthScore }),
+              el("td", { text: calibrationDue }),
+              el("td", { text: sparesStatus }),
+              el(
+                "td",
+                {},
+                [
+                  el("span", {
+                    class: `badge ${status === "active" ? "ok" : "error"}`,
+                    text: status,
+                  }),
+                ]
+              ),
+              el("td", {}, [
+                el("button", {
+                  class: "btn small",
+                  type: "button",
+                  dataset: { action: "edit", id: String(id) },
+                  text: "Edit",
+                }),
+                " ",
+                el("button", {
+                  class: "btn small",
+                  type: "button",
+                  dataset: { action: "duplicate", id: String(id) },
+                  text: "Duplicate",
+                }),
+                " ",
+                el("button", {
+                  class: "btn small danger",
+                  type: "button",
+                  dataset: { action: "delete", id: String(id) },
+                  text: "Delete",
+                }),
+              ]),
+            ]);
+            tableBody.appendChild(row);
+          } catch (rowErr) {
+            console.error("Error rendering instrument row:", inst, rowErr);
+          }
+        }
+        if (pagination) pagination.textContent = `Showing ${instruments.length} of ${instruments.length}`;
+        setStatus(
+          "instruments-status",
+          `Showing ${instruments.length} instrument(s)`,
+          "ok"
+        );
+      } catch (err) {
+        console.error("Error in render:", err);
+        setStatus(
+          "instruments-status",
+          err?.message || "Failed to load instruments",
+          "error"
+        );
+        tableBody.innerHTML = "";
+      }
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      render();
     }
 
     return { show };
@@ -3280,48 +3916,7 @@
       }
     }
 
-    async function ensureConfigTreeLoaded() {
-      if (state.cfgTree.length) return;
-      try {
-        const tree = await api.get("/api/config/tree");
-        state.cfgTree = Array.isArray(tree) ? tree : [];
-        plcView && plcView.show; // noop - keep linter quiet
-        // build index for name lookups
-        // reuse plc view indexer logic
-        // (duplicated small part to avoid tight coupling)
-        state.cfgIndex = new Map();
-        const add = (type, raw, parentKey = null) => {
-          const id = clampInt(raw.id, 0);
-          const key = `${type}:${id}`;
-          const name =
-            type === "plc"
-              ? raw.name
-              : type === "container"
-              ? raw.name
-              : type === "equipment"
-              ? raw.name
-              : type === "datapoint"
-              ? raw.label
-              : String(raw.name || raw.label || "");
-          state.cfgIndex.set(key, { key, type, id, name, parentKey, raw });
-          return key;
-        };
-        for (const plc of state.cfgTree) {
-          const plcKey = add("plc", plc, null);
-          for (const dp of plc.datapoints || []) add("datapoint", dp, plcKey);
-          for (const c of plc.containers || []) {
-            const cKey = add("container", c, plcKey);
-            for (const dp of c.datapoints || []) add("datapoint", dp, cKey);
-            for (const e of c.equipment || []) {
-              const eKey = add("equipment", e, cKey);
-              for (const dp of e.datapoints || []) add("datapoint", dp, eKey);
-            }
-          }
-        }
-      } catch (err) {
-        setStatus("access-status", err?.message || "Failed to load configuration tree", "error");
-      }
-    }
+
 
     function renderPrincipalOptions() {
       const sel = $("principal-id");
