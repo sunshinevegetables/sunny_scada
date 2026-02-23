@@ -2598,18 +2598,59 @@
     let initialized = false;
     let editingInstrumentId = null;
     let instrumentsCache = [];
+    let instrumentsCacheFiltered = [];
+    let pageIndex = 0;
+    const PAGE_SIZE = 25;
 
     function bind() {
       const btnRefresh = $("btn-instruments-refresh");
       const btnAdd = $("btn-instruments-add");
       const form = $("form-instrument");
       const table = $("instruments-table");
+      const search = $("instrument-search");
+      const filterEquipment = $("instrument-filter-equipment");
+      const filterType = $("instrument-filter-type");
+      const filterStatus = $("instrument-filter-status");
+      const filterCalibration = $("instrument-filter-calibration");
+      const btnPrev = $("btn-instruments-prev");
+      const btnNext = $("btn-instruments-next");
 
-      btnRefresh?.addEventListener("click", () => render());
+      btnRefresh?.addEventListener("click", () => reloadAndRender());
       btnAdd?.addEventListener("click", async () => {
         await openInstrumentModal("create");
       });
       table?.addEventListener("click", onTableClick);
+      search?.addEventListener("input", () => {
+        pageIndex = 0;
+        applyFiltersAndRender();
+      });
+      filterEquipment?.addEventListener("change", () => {
+        pageIndex = 0;
+        applyFiltersAndRender();
+      });
+      filterType?.addEventListener("change", () => {
+        pageIndex = 0;
+        applyFiltersAndRender();
+      });
+      filterStatus?.addEventListener("change", () => {
+        pageIndex = 0;
+        applyFiltersAndRender();
+      });
+      filterCalibration?.addEventListener("change", () => {
+        pageIndex = 0;
+        applyFiltersAndRender();
+      });
+      btnPrev?.addEventListener("click", () => {
+        if (pageIndex <= 0) return;
+        pageIndex -= 1;
+        renderTable();
+      });
+      btnNext?.addEventListener("click", () => {
+        const total = instrumentsCacheFiltered.length;
+        if ((pageIndex + 1) * PAGE_SIZE >= total) return;
+        pageIndex += 1;
+        renderTable();
+      });
 
       form?.addEventListener("submit", async (ev) => {
         ev.preventDefault();
@@ -2631,8 +2672,7 @@
           closeDialog("modal-instrument");
           form.reset();
           editingInstrumentId = null;
-          // Reload instruments list
-          render();
+          await reloadAndRender();
         } catch (err) {
           console.error("Instrument save error:", err);
           setStatus("modal-instrument-status", err?.message || "Failed to save instrument", "error");
@@ -2681,6 +2721,234 @@
       } catch (err) {
         console.error("Failed to load equipment:", err);
         setStatus("modal-instrument-status", `Failed to load equipment: ${err?.message || ""}`, "error");
+      }
+    }
+
+    async function populateInstrumentEquipmentFilter() {
+      const sel = $("instrument-filter-equipment");
+      if (!sel) return;
+
+      let options = [];
+      try {
+        const equipment = await api.get("/maintenance/equipment");
+        if (Array.isArray(equipment) && equipment.length) {
+          options = equipment.map((eq) => ({
+            id: clampInt(eq.id, 0),
+            label: String(eq.name || eq.equipment_code || `#${eq.id}`),
+          }));
+        }
+      } catch {
+        // fallback below
+      }
+
+      if (!options.length) {
+        await ensureConfigTreeLoaded();
+        if (Array.isArray(state.cfgTree)) {
+          for (const plc of state.cfgTree) {
+            const plcName = String(plc?.name || "PLC");
+            const containers = Array.isArray(plc?.containers) ? plc.containers : [];
+            for (const c of containers) {
+              const cName = String(c?.name || "Container");
+              const equipmentList = Array.isArray(c?.equipment) ? c.equipment : [];
+              for (const e of equipmentList) {
+                options.push({
+                  id: clampInt(e?.id, 0),
+                  label: `${String(e?.name || "Equipment")} (${plcName} / ${cName})`,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      const current = String(sel.value || "");
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: "All Equipment" }));
+      const seen = new Set();
+      for (const opt of options) {
+        const id = clampInt(opt.id, 0);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        sel.appendChild(el("option", { value: String(id), text: String(opt.label || `#${id}`) }));
+      }
+      sel.value = current;
+    }
+
+    function populateTypeFilter() {
+      const sel = $("instrument-filter-type");
+      if (!sel) return;
+      const current = String(sel.value || "");
+
+      const values = new Set();
+      for (const inst of instrumentsCache) {
+        const type = String(inst?.instrument_type || "").trim();
+        if (type) values.add(type);
+      }
+
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: "All Types" }));
+      for (const type of Array.from(values).sort((a, b) => a.localeCompare(b))) {
+        sel.appendChild(el("option", { value: type, text: type }));
+      }
+      sel.value = Array.from(sel.options).some((o) => o.value === current) ? current : "";
+    }
+
+    function parseDateSafe(value) {
+      if (!value) return null;
+      const dt = new Date(String(value));
+      return Number.isNaN(dt.getTime()) ? null : dt;
+    }
+
+    function matchesCalibrationFilter(inst, calibrationFilter) {
+      if (!calibrationFilter) return true;
+      const dueRaw = inst?.meta?.calibration_due;
+      if (!dueRaw) return true;
+
+      const due = parseDateSafe(dueRaw);
+      if (!due) return true;
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const diffDays = Math.floor((due.getTime() - today.getTime()) / msPerDay);
+
+      if (calibrationFilter === "overdue") return diffDays < 0;
+      if (calibrationFilter === "7d") return diffDays >= 0 && diffDays <= 7;
+      if (calibrationFilter === "30d") return diffDays >= 0 && diffDays <= 30;
+      return true;
+    }
+
+    function applyFiltersAndRender() {
+      const searchTerm = String($("instrument-search")?.value || "").trim().toLowerCase();
+      const equipmentFilter = String($("instrument-filter-equipment")?.value || "").trim();
+      const typeFilter = String($("instrument-filter-type")?.value || "").trim();
+      const statusFilter = String($("instrument-filter-status")?.value || "").trim();
+      const calibrationFilter = String($("instrument-filter-calibration")?.value || "").trim();
+
+      instrumentsCacheFiltered = instrumentsCache.filter((inst) => {
+        const label = String(inst?.label || "");
+        const metaName = String(inst?.meta?.name || "");
+        const serial = String(inst?.serial_number || "");
+        const type = String(inst?.instrument_type || "");
+        const model = String(inst?.model || "");
+        const location = String(inst?.location || "");
+
+        if (searchTerm) {
+          const haystack = [label, metaName, serial, type, model, location].join(" ").toLowerCase();
+          if (!haystack.includes(searchTerm)) return false;
+        }
+
+        if (equipmentFilter) {
+          const eqId = clampInt(inst?.equipment_id, 0);
+          if (String(eqId) !== equipmentFilter) return false;
+        }
+
+        if (typeFilter && String(type).trim() !== typeFilter) return false;
+
+        if (statusFilter && String(inst?.status || "").trim() !== statusFilter) return false;
+
+        if (!matchesCalibrationFilter(inst, calibrationFilter)) return false;
+
+        return true;
+      });
+
+      const maxPage = Math.max(0, Math.ceil(instrumentsCacheFiltered.length / PAGE_SIZE) - 1);
+      if (pageIndex > maxPage) pageIndex = maxPage;
+      renderTable();
+    }
+
+    function renderTable() {
+      const tableBody = $("instruments-table")?.querySelector("tbody");
+      const pagination = $("instruments-pagination");
+      const btnPrev = $("btn-instruments-prev");
+      const btnNext = $("btn-instruments-next");
+      if (!tableBody) return;
+
+      const start = pageIndex * PAGE_SIZE;
+      const rows = instrumentsCacheFiltered.slice(start, start + PAGE_SIZE);
+
+      tableBody.innerHTML = "";
+      for (const inst of rows) {
+        const id = clampInt(inst?.id, 0);
+        const code = String(inst?.label || "");
+        const name = String(inst?.meta?.name || "");
+        const equipmentName = String(inst?.equipment?.name || "-");
+        const type = String(inst?.instrument_type || "");
+        const pvDatapoint = String(inst?.mapped_datapoints?.[0]?.label || "-");
+        const healthScore = String(inst?.meta?.health_score ?? "-");
+        const calibrationDue = String(inst?.meta?.calibration_due || "-");
+        const sparesStatus = String(inst?.meta?.spares_status || "-");
+        const status = String(inst?.status || "");
+
+        const row = el("tr", {}, [
+          el("td", { text: code }),
+          el("td", { text: name }),
+          el("td", { text: equipmentName }),
+          el("td", { text: type }),
+          el("td", { text: pvDatapoint }),
+          el("td", { text: healthScore }),
+          el("td", { text: calibrationDue }),
+          el("td", { text: sparesStatus }),
+          el("td", {}, [
+            el("span", {
+              class: `badge ${status === "active" ? "ok" : "error"}`,
+              text: status,
+            }),
+          ]),
+          el("td", {}, [
+            el("button", {
+              class: "btn small",
+              type: "button",
+              dataset: { action: "edit", id: String(id) },
+              text: "Edit",
+            }),
+            " ",
+            el("button", {
+              class: "btn small",
+              type: "button",
+              dataset: { action: "duplicate", id: String(id) },
+              text: "Duplicate",
+            }),
+            " ",
+            el("button", {
+              class: "btn small danger",
+              type: "button",
+              dataset: { action: "delete", id: String(id) },
+              text: "Delete",
+            }),
+          ]),
+        ]);
+        tableBody.appendChild(row);
+      }
+
+      const filteredTotal = instrumentsCacheFiltered.length;
+      if (pagination) pagination.textContent = `Showing ${rows.length} of ${filteredTotal}`;
+      if (btnPrev) btnPrev.disabled = pageIndex <= 0;
+      if (btnNext) btnNext.disabled = (pageIndex + 1) * PAGE_SIZE >= filteredTotal;
+
+      setStatus("instruments-status", `Showing ${filteredTotal} instrument(s)`, "ok");
+    }
+
+    async function reloadAndRender() {
+      const tableBody = $("instruments-table")?.querySelector("tbody");
+      const pagination = $("instruments-pagination");
+      if (!tableBody) return;
+
+      try {
+        setStatus("instruments-status", "Loading...", "");
+        const instruments = await api.get("/maintenance/instruments");
+        instrumentsCache = Array.isArray(instruments) ? instruments : [];
+        await populateInstrumentEquipmentFilter();
+        populateTypeFilter();
+        applyFiltersAndRender();
+      } catch (err) {
+        console.error("Error loading instruments:", err);
+        instrumentsCache = [];
+        instrumentsCacheFiltered = [];
+        tableBody.innerHTML = "";
+        if (pagination) pagination.textContent = "Showing 0 of 0";
+        setStatus("instruments-status", err?.message || "Failed to load instruments", "error");
       }
     }
 
@@ -2778,105 +3046,10 @@
           if (!confirmDanger(`Delete instrument '${label}'?`)) return;
           await api.delete(`/maintenance/instruments/${id}`);
           toast("Instrument deleted");
-          await render();
+          await reloadAndRender();
         }
       } catch (err) {
         toast(err?.message || "Instrument action failed", "error");
-      }
-    }
-
-    async function render() {
-      const tableBody = $("instruments-table")?.querySelector("tbody");
-      const pagination = $("instruments-pagination");
-      if (!tableBody) return;
-      try {
-        setStatus("instruments-status", "Loading...", "");
-        console.log("Fetching instruments...");
-        const instruments = await api.get("/maintenance/instruments");
-        console.log("Instruments response:", instruments);
-        if (!Array.isArray(instruments)) {
-          instrumentsCache = [];
-          setStatus("instruments-status", "No instruments found.", "");
-          tableBody.innerHTML = "";
-          if (pagination) pagination.textContent = "Showing 0 of 0";
-          return;
-        }
-        instrumentsCache = instruments;
-        tableBody.innerHTML = "";
-        for (const inst of instruments) {
-          try {
-            const id = clampInt(inst.id, 0);
-            const code = String(inst.label || "");
-            const name = String(inst.meta?.name || "");
-            const equipmentName = String(inst.equipment?.name || "-");
-            const type = String(inst.instrument_type || "");
-            const pvDatapoint = String(inst.mapped_datapoints?.[0]?.label || "-");
-            const healthScore = String(inst.meta?.health_score ?? "-");
-            const calibrationDue = String(inst.meta?.calibration_due || "-");
-            const sparesStatus = String(inst.meta?.spares_status || "-");
-            const status = String(inst.status || "");
-
-            const row = el("tr", {}, [
-              el("td", { text: code }),
-              el("td", { text: name }),
-              el("td", { text: equipmentName }),
-              el("td", { text: type }),
-              el("td", { text: pvDatapoint }),
-              el("td", { text: healthScore }),
-              el("td", { text: calibrationDue }),
-              el("td", { text: sparesStatus }),
-              el(
-                "td",
-                {},
-                [
-                  el("span", {
-                    class: `badge ${status === "active" ? "ok" : "error"}`,
-                    text: status,
-                  }),
-                ]
-              ),
-              el("td", {}, [
-                el("button", {
-                  class: "btn small",
-                  type: "button",
-                  dataset: { action: "edit", id: String(id) },
-                  text: "Edit",
-                }),
-                " ",
-                el("button", {
-                  class: "btn small",
-                  type: "button",
-                  dataset: { action: "duplicate", id: String(id) },
-                  text: "Duplicate",
-                }),
-                " ",
-                el("button", {
-                  class: "btn small danger",
-                  type: "button",
-                  dataset: { action: "delete", id: String(id) },
-                  text: "Delete",
-                }),
-              ]),
-            ]);
-            tableBody.appendChild(row);
-          } catch (rowErr) {
-            console.error("Error rendering instrument row:", inst, rowErr);
-          }
-        }
-        if (pagination) pagination.textContent = `Showing ${instruments.length} of ${instruments.length}`;
-        setStatus(
-          "instruments-status",
-          `Showing ${instruments.length} instrument(s)`,
-          "ok"
-        );
-      } catch (err) {
-        console.error("Error in render:", err);
-        setStatus(
-          "instruments-status",
-          err?.message || "Failed to load instruments",
-          "error"
-        );
-        tableBody.innerHTML = "";
       }
     }
 
@@ -2885,7 +3058,7 @@
         bind();
         initialized = true;
       }
-      render();
+      await reloadAndRender();
     }
 
     return { show };
