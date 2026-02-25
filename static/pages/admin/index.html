@@ -23,8 +23,7 @@
           <a href="#meta" data-view="meta" class="nav-link">Meta</a>
           <a href="#access" data-view="access" class="nav-link">Access Control</a>
           <a href="#alarms" data-view="alarms" class="nav-link">Manage Alarms</a>
-          <a href="#alarm-log" data-view="alarm-log" class="nav-link">Alarm Log</a>
-          <a href="#command-log" data-view="command-log" class="nav-link">Command Log</a>
+          <a href="#logs" data-view="logs" class="nav-link">Logs</a>
         </nav>
       </aside>
 
@@ -463,74 +462,86 @@
             </div>
           </section>
 
-          <!-- ALARM LOG -->
-          <section id="view-alarm-log" class="view hidden">
+          <!-- LOGS -->
+          <section id="view-logs" class="view hidden">
             <div class="view-header">
-              <h2>Alarm Log</h2>
+              <h2>Logs</h2>
               <div class="actions">
+                <button id="btn-log-tab-alarm" class="btn primary" data-log-tab="alarm" type="button">Alarm</button>
+                <button id="btn-log-tab-command" class="btn" data-log-tab="command" type="button">Command</button>
+              </div>
+            </div>
+
+            <div id="log-tab-alarm" class="log-tab-panel">
+              <div class="toolbar">
+                <input id="alarm-log-search" class="input" placeholder="Filter message or source…" />
+                <select id="alarm-log-severity" class="input">
+                  <option value="">All severities</option>
+                  <option value="critical">critical</option>
+                  <option value="major">major</option>
+                  <option value="minor">minor</option>
+                  <option value="info">info</option>
+                </select>
+                <label style="margin-left:8px"><input id="alarm-log-acked" type="checkbox" /> Show only acked</label>
                 <button id="btn-alarm-log-refresh" class="btn">Refresh</button>
               </div>
-            </div>
 
-            <div class="toolbar">
-              <input id="alarm-log-search" class="input" placeholder="Filter message or source…" />
-              <select id="alarm-log-severity" class="input">
-                <option value="">All severities</option>
-                <option value="critical">critical</option>
-                <option value="major">major</option>
-                <option value="minor">minor</option>
-                <option value="info">info</option>
-              </select>
-              <label style="margin-left:8px"><input id="alarm-log-acked" type="checkbox" /> Show only acked</label>
-            </div>
-
-            <div id="alarm-log-status" class="status"></div>
-            <div class="table-wrap">
-              <table class="table" id="alarm-log-table">
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Severity</th>
-                    <th>Message</th>
-                    <th>Source</th>
-                    <th>Acked</th>
-                    <th style="width:160px">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </section>
-
-          <!-- COMMAND LOG -->
-          <section id="view-command-log" class="view hidden">
-            <div class="view-header">
-              <h2>Command Log</h2>
-              <div class="actions">
-                <button id="btn-command-log-refresh" class="btn">Refresh</button>
+              <div id="alarm-log-status" class="status"></div>
+              <div class="table-wrap">
+                <table class="table" id="alarm-log-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Severity</th>
+                      <th>Message</th>
+                      <th>Source</th>
+                      <th>Acked</th>
+                      <th style="width:160px">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
               </div>
             </div>
 
-            <div id="command-log-status" class="status"></div>
-            <div class="table-wrap">
-              <table class="table" id="command-log-table">
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>PLC</th>
-                    <th>Container</th>
-                    <th>Equipment</th>
-                    <th>Data Point</th>
-                    <th>Bit Label</th>
-                    <th>Value</th>
-                    <th>Status</th>
-                    <th>Attempts</th>
-                    <th>User</th>
-                    <th>Client IP</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+            <div id="log-tab-command" class="log-tab-panel hidden">
+              <div class="toolbar">
+                <input id="command-log-search" class="input" placeholder="Filter PLC / equipment / datapoint / user…" />
+                <select id="command-log-status-filter" class="input">
+                  <option value="">All statuses</option>
+                  <option value="pending">pending</option>
+                  <option value="queued">queued</option>
+                  <option value="running">running</option>
+                  <option value="success">success</option>
+                  <option value="failed">failed</option>
+                  <option value="timeout">timeout</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+                <label style="margin-left:8px"><input id="command-log-failed-only" type="checkbox" /> Show only failed</label>
+                <button id="btn-command-log-refresh" class="btn">Refresh</button>
+              </div>
+
+              <div id="command-log-status" class="status"></div>
+              <div class="table-wrap">
+                <table class="table" id="command-log-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>PLC</th>
+                      <th>Container</th>
+                      <th>Equipment</th>
+                      <th>Data Point</th>
+                      <th>Bit Label</th>
+                      <th>Value</th>
+                      <th>Status</th>
+                      <th>Attempts</th>
+                      <th>User</th>
+                      <th>Client IP</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
           </section>
 

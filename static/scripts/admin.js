@@ -337,6 +337,9 @@
         retryTimer: null,
       },
     },
+    logs: {
+      activeTab: "alarm",
+    },
   };
 
   // -----------------------------
@@ -481,6 +484,7 @@
       { view: "maintenance-assets", ok: can(p, "maintenance:read") || can(p, "maintenance:write") },
       { view: "meta", ok: can(p, "config:read") || can(p, "config:write") },
       { view: "alarms", ok: can(p, "alarms:admin") },
+      { view: "logs", ok: can(p, "alarms:admin") || can(p, "command:read") || can(p, "command:write") },
       { view: "access", ok: can(p, "users:admin") || can(p, "roles:admin") },
     ];
 
@@ -496,9 +500,12 @@
 
   async function route() {
     const { view, query } = parseHash();
+    const normalizedView = view === "alarm-log" || view === "command-log" ? "logs" : view;
+    if (view === "alarm-log" && !query.tab) query.tab = "alarm";
+    if (view === "command-log" && !query.tab) query.tab = "command";
 
     // Accept ANY hash view that actually exists in the DOM.
-    const requested = hasView(view) ? view : null;
+    const requested = hasView(normalizedView) ? normalizedView : null;
     const target = requested || firstAllowedView();
 
     // Client-side guards (UX only; server is authoritative)
@@ -513,8 +520,10 @@
       return navigate(firstAllowedView());
     if (target === "maintenance-assets" && !(can(state.perms, "maintenance:read") || can(state.perms, "maintenance:write")))
       return navigate(firstAllowedView());
-    if (target === "alarm-log" && !can(state.perms, "alarms:admin")) return navigate(firstAllowedView());
-    if (target === "command-log" && !(can(state.perms, "command:read") || can(state.perms, "command:write")))
+    if (
+      target === "logs" &&
+      !(can(state.perms, "alarms:admin") || can(state.perms, "command:read") || can(state.perms, "command:write"))
+    )
       return navigate(firstAllowedView());
 
     showView(target);
@@ -527,8 +536,41 @@
     if (target === "meta") await metaView.show();
     if (target === "alarms") await alarmsView.show();
     if (target === "access") await accessView.show(query);
-    if (target === "alarm-log") await loadAlarmLog();
-    if (target === "command-log") await loadCommandLog();
+    if (target === "logs") await showLogsView(query);
+  }
+
+  function setLogsTab(tab) {
+    const canAlarm = can(state.perms, "alarms:admin");
+    const canCommand = can(state.perms, "command:read") || can(state.perms, "command:write") || can(state.perms, "command:*");
+    const requested = tab === "command" ? "command" : "alarm";
+
+    let next = requested;
+    if (next === "alarm" && !canAlarm) next = canCommand ? "command" : "alarm";
+    if (next === "command" && !canCommand) next = canAlarm ? "alarm" : "command";
+    state.logs.activeTab = next;
+
+    const alarmPanel = $("log-tab-alarm");
+    const commandPanel = $("log-tab-command");
+    alarmPanel?.classList.toggle("hidden", next !== "alarm");
+    commandPanel?.classList.toggle("hidden", next !== "command");
+
+    const alarmBtn = $("btn-log-tab-alarm");
+    const commandBtn = $("btn-log-tab-command");
+    if (alarmBtn) {
+      alarmBtn.disabled = !canAlarm;
+      alarmBtn.classList.toggle("primary", next === "alarm");
+    }
+    if (commandBtn) {
+      commandBtn.disabled = !canCommand;
+      commandBtn.classList.toggle("primary", next === "command");
+    }
+  }
+
+  async function showLogsView(query = {}) {
+    const requestedTab = String(query?.tab || state.logs.activeTab || "alarm").toLowerCase();
+    setLogsTab(requestedTab === "command" ? "command" : "alarm");
+    if (state.logs.activeTab === "command") await loadCommandLog();
+    else await loadAlarmLog();
   }
 
 
@@ -622,6 +664,14 @@
   }
 
   document.addEventListener('click', (ev) => {
+    const tabBtn = ev.target?.closest?.("button[data-log-tab]");
+    if (tabBtn) {
+      const tab = String(tabBtn.dataset.logTab || "alarm");
+      setLogsTab(tab);
+      if (state.logs.activeTab === "command") loadCommandLog();
+      else loadAlarmLog();
+      return;
+    }
     if (ev.target && ev.target.id === 'btn-alarm-log-refresh') {
       loadAlarmLog();
     }
@@ -633,6 +683,18 @@
   document.addEventListener('change', (ev) => {
     if (ev.target && (ev.target.id === 'alarm-log-severity' || ev.target.id === 'alarm-log-acked')) {
       loadAlarmLog();
+      return;
+    }
+    if (ev.target && (ev.target.id === 'command-log-status-filter' || ev.target.id === 'command-log-failed-only')) {
+      renderCommandLog();
+      updateCommandLogShowingStatus();
+    }
+  });
+
+  document.addEventListener('input', (ev) => {
+    if (ev.target && ev.target.id === 'command-log-search') {
+      renderCommandLog();
+      updateCommandLogShowingStatus();
     }
   });
 
@@ -675,6 +737,44 @@
     state.commandLog.total = Math.max(Number(state.commandLog.total || 0), rows.length);
   }
 
+  function getCommandLogFilters() {
+    const search = String($("command-log-search")?.value || "").trim().toLowerCase();
+    const status = String($("command-log-status-filter")?.value || "").trim().toLowerCase();
+    const failedOnly = !!$("command-log-failed-only")?.checked;
+    return { search, status, failedOnly };
+  }
+
+  function applyCommandLogFilters(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const { search, status, failedOnly } = getCommandLogFilters();
+    return list.filter((r) => {
+      const rowStatus = String(r?.status || "").trim().toLowerCase();
+      if (failedOnly && rowStatus !== "failed") return false;
+      if (status && rowStatus !== status) return false;
+      if (!search) return true;
+      const haystack = [
+        String(r?.plc || ""),
+        String(r?.container || ""),
+        String(r?.equipment || ""),
+        String(r?.data_point_label || ""),
+        String(r?.bit_label || ""),
+        String(r?.status || ""),
+        String(r?.username || ""),
+        String(r?.client_ip || ""),
+        String(r?.value ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    });
+  }
+
+  function updateCommandLogShowingStatus(prefix = "Showing") {
+    const allRows = Array.isArray(state.commandLog.items) ? state.commandLog.items : [];
+    const shownRows = applyCommandLogFilters(allRows);
+    setStatus("command-log-status", `${prefix} ${shownRows.length} of ${state.commandLog.total || allRows.length}`, "ok");
+  }
+
   function renderCommandLog() {
     const table = $("command-log-table");
     if (!table) return;
@@ -682,11 +782,12 @@
     if (!tbody) return;
     tbody.innerHTML = "";
 
-    const rows = Array.isArray(state.commandLog.items) ? state.commandLog.items : [];
+    const allRows = Array.isArray(state.commandLog.items) ? state.commandLog.items : [];
+    const rows = applyCommandLogFilters(allRows);
     if (!rows.length) {
       tbody.appendChild(
         el("tr", {}, [
-          el("td", { colspan: "11", class: "muted", text: "No command events yet." }),
+          el("td", { colspan: "11", class: "muted", text: allRows.length ? "No command events match filters." : "No command events yet." }),
         ])
       );
       return;
@@ -717,13 +818,13 @@
       state.commandLog.items = items.sort(commandLogSortDesc).slice(0, state.commandLog.limit);
       state.commandLog.total = state.commandLog.items.length;
       renderCommandLog();
-      setStatus("command-log-status", `Live: ${state.commandLog.items.length} command event(s)`, "ok");
+      updateCommandLogShowingStatus("Live");
       return;
     }
     if (msg.type === "command_log") {
       upsertCommandLogItem(normalizeCommandLogItem(msg));
       renderCommandLog();
-      setStatus("command-log-status", `Live: ${state.commandLog.items.length} command event(s)`, "ok");
+      updateCommandLogShowingStatus("Live");
     }
   }
 
@@ -786,6 +887,7 @@
     const canRead = can(state.perms, "command:read") || can(state.perms, "command:*");
     if (!force && state.commandLog.items.length) {
       renderCommandLog();
+      updateCommandLogShowingStatus();
       startCommandLogStream();
       return;
     }
@@ -801,10 +903,14 @@
 
     setStatus("command-log-status", "Loading command history…", "");
     try {
+      const statusFilter = String($("command-log-status-filter")?.value || "").trim();
+      const failedOnly = !!$("command-log-failed-only")?.checked;
+      const queryStatus = statusFilter || (failedOnly ? "failed" : "");
       const data = await api.get('/logs/commands', {
         query: {
           limit: state.commandLog.limit,
           offset: state.commandLog.offset,
+          status: queryStatus || undefined,
         },
       });
 
@@ -831,7 +937,7 @@
       state.commandLog.total = Number(data.total || state.commandLog.items.length);
 
       renderCommandLog();
-      setStatus("command-log-status", `Showing ${state.commandLog.items.length} of ${state.commandLog.total}`, "ok");
+      updateCommandLogShowingStatus();
     } catch (e) {
       setStatus("command-log-status", `Error loading command log: ${e}`, "error");
     }
@@ -842,6 +948,13 @@
   async function initAdminApp() {
     const meName = $("me-name");
     const logoutBtn = $("logout-btn");
+
+    const existingAuth = authStore.get();
+    if (!existingAuth?.access_token || !existingAuth?.refresh_token) {
+      authStore.clear();
+      window.location.href = "/admin-panel/login";
+      return;
+    }
 
     try {
       const me = await api.get("/auth/me");
@@ -862,8 +975,7 @@
       meta: can(state.perms, "config:read") || can(state.perms, "config:write"),
       access: can(state.perms, "users:admin") || can(state.perms, "roles:admin"),
       alarms: can(state.perms, "alarms:admin"),
-      "alarm-log": can(state.perms, "alarms:admin"),
-      "command-log": can(state.perms, "command:read") || can(state.perms, "command:write"),
+      logs: can(state.perms, "alarms:admin") || can(state.perms, "command:read") || can(state.perms, "command:write"),
     };
     document.querySelectorAll(".nav-link").forEach((a) => {
       const v = a.getAttribute("data-view");
