@@ -20,6 +20,7 @@ from . import (
     admin_alarm_log,
     frontend_alarms,
     instruments,
+    watch,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "admin_alarm_log",
     "frontend_alarms",
     "instruments",
+    "watch",
 ]

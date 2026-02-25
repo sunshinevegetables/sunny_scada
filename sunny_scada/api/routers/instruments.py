@@ -4,7 +4,7 @@ import datetime as dt
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from sunny_scada.api.deps import get_audit_service, get_current_user, get_db, require_permission
@@ -70,6 +70,28 @@ class InstrumentCalibrationIn(BaseModel):
     certificate_no: Optional[str] = Field(default=None, max_length=120)
     notes: Optional[str] = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("as_found", "as_left", mode="before")
+    @classmethod
+    def _coerce_optional_float(cls, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        if text.startswith("+"):
+            text = text[1:].strip()
+
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            raise ValueError("must be a numeric value")
 
 
 class InstrumentSpareIn(BaseModel):

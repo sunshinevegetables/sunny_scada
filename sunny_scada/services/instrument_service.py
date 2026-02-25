@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from sunny_scada.db.models import (
     CfgDataPoint,
+    CfgEquipment,
     Equipment,
     Instrument,
     InstrumentAttachment,
@@ -19,9 +20,11 @@ from sunny_scada.db.models import (
     Vendor,
 )
 from sunny_scada.services.datapoint_identity import make_canonical_datapoint_key
+from sunny_scada.services.maintenance_equipment_service import MaintenanceEquipmentService
 
 
 _SAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*]')
+_equipment_service = MaintenanceEquipmentService()
 
 
 def _utcnow() -> dt.datetime:
@@ -48,7 +51,18 @@ class InstrumentService:
             "name": str(equipment.name),
             "location": equipment.location,
             "is_active": bool(equipment.is_active),
+            "asset_category": equipment.asset_category,
+            "asset_type": equipment.asset_type,
+            "criticality": equipment.criticality,
         }
+
+    def _equipment_path(self, db: Optional[Session], equipment_id: Optional[int]) -> list[dict[str, Any]]:
+        if db is None or equipment_id is None:
+            return []
+        try:
+            return _equipment_service.equipment_path(db, equipment_id=int(equipment_id))
+        except ValueError:
+            return []
 
     def _vendor_summary(self, vendor: Optional[Vendor]) -> Optional[dict[str, Any]]:
         if not vendor:
@@ -74,7 +88,21 @@ class InstrumentService:
             )
         return out
 
-    def _instrument_out(self, instrument: Instrument) -> dict[str, Any]:
+    def _instrument_out(self, instrument: Instrument, db: Optional[Session] = None) -> dict[str, Any]:
+        # Build base meta dictionary
+        meta = dict(instrument.meta or {})
+        
+        # Query latest calibration to populate calibration_due
+        if db is not None:
+            latest_calibration = (
+                db.query(InstrumentCalibration)
+                .filter(InstrumentCalibration.instrument_id == int(instrument.id))
+                .order_by(InstrumentCalibration.ts.desc(), InstrumentCalibration.id.desc())
+                .first()
+            )
+            if latest_calibration and latest_calibration.next_due_at:
+                meta["calibration_due"] = latest_calibration.next_due_at.isoformat()
+        
         return {
             "id": int(instrument.id),
             "label": str(instrument.label),
@@ -85,7 +113,7 @@ class InstrumentService:
             "location": instrument.location,
             "installed_at": instrument.installed_at,
             "notes": instrument.notes,
-            "meta": instrument.meta or {},
+            "meta": meta,
             "equipment_id": instrument.equipment_id,
             "vendor_id": instrument.vendor_id,
             "equipment": self._equipment_summary(instrument.equipment),
@@ -93,8 +121,10 @@ class InstrumentService:
             "mapped_datapoints": self._mapped_datapoints_out(instrument),
         }
 
-    def _instrument_detail_out(self, instrument: Instrument) -> dict[str, Any]:
-        base = self._instrument_out(instrument)
+    def _instrument_detail_out(self, instrument: Instrument, db: Optional[Session] = None) -> dict[str, Any]:
+        base = self._instrument_out(instrument, db)
+        base["equipment_summary"] = self._equipment_summary(instrument.equipment)
+        base["equipment_path"] = self._equipment_path(db, instrument.equipment_id)
 
         recommended_spares: list[dict[str, Any]] = []
         current_stock_levels: list[dict[str, Any]] = []
@@ -189,13 +219,51 @@ class InstrumentService:
                 )
             )
         rows = query.order_by(Instrument.id.asc()).all()
-        return [self._instrument_out(row) for row in rows]
+        return [self._instrument_out(row, db) for row in rows]
 
     def get_instrument(self, db: Session, instrument_id: int) -> Optional[dict[str, Any]]:
         row = self._load_instrument(db, int(instrument_id))
         if row is None:
             return None
-        return self._instrument_detail_out(row)
+        return self._instrument_detail_out(row, db)
+
+    def _ensure_equipment_from_config(self, db: Session, equipment_id: int) -> None:
+        """Auto-create Equipment record from config tree if it doesn't exist."""
+        # Try to find equipment in config tree
+        cfg_equipment = db.query(CfgEquipment).filter(CfgEquipment.id == equipment_id).one_or_none()
+        if cfg_equipment is None:
+            raise ValueError("equipment not found in config tree")
+        
+        # Create Equipment record from config
+        equipment_code = f"EQ-{equipment_id:04d}"
+        existing_by_code = db.query(Equipment).filter(Equipment.equipment_code == equipment_code).one_or_none()
+        if existing_by_code:
+            # Already exists with this code, just different ID
+            return
+            
+        equipment = Equipment(
+            id=equipment_id,
+            equipment_code=equipment_code,
+            name=cfg_equipment.name or f"Equipment {equipment_id}",
+            location=None,
+            description=f"Auto-created from config tree (ID: {equipment_id})",
+            vendor_id=None,
+            parent_id=None,
+            asset_category=None,
+            asset_type=None,
+            criticality="B",
+            duty_cycle_hours_per_day=None,
+            spares_class="standard",
+            safety_classification=[],
+            is_active=True,
+            meta={},
+        )
+        db.add(equipment)
+        try:
+            db.flush()
+        except Exception as e:
+            db.rollback()
+            raise ValueError(f"failed to create equipment: {str(e)}")
 
     def create_instrument(
         self,
@@ -219,15 +287,24 @@ class InstrumentService:
 
         status_v = str(status or "active").strip() or "active"
 
-        if equipment_id is not None and db.query(Equipment.id).filter(Equipment.id == int(equipment_id)).one_or_none() is None:
-            raise ValueError("equipment not found")
+        # Equipment is mandatory
+        if equipment_id is None or equipment_id <= 0:
+            raise ValueError("equipment is required")
+
+        # Ensure Equipment record exists, create from config if needed
+        equipment_id_int = int(equipment_id)
+        equipment_exists = db.query(Equipment.id).filter(Equipment.id == equipment_id_int).one_or_none()
+        if not equipment_exists:
+            # Try to auto-create from config tree
+            self._ensure_equipment_from_config(db, equipment_id_int)
+            
         if vendor_id is not None and db.query(Vendor.id).filter(Vendor.id == int(vendor_id)).one_or_none() is None:
             raise ValueError("vendor not found")
 
         row = Instrument(
             label=label_v,
             status=status_v,
-            equipment_id=(int(equipment_id) if equipment_id is not None else None),
+            equipment_id=equipment_id_int,
             vendor_id=(int(vendor_id) if vendor_id is not None else None),
             instrument_type=(str(instrument_type).strip() if instrument_type is not None else None),
             model=(str(model).strip() if model is not None else None),
@@ -269,12 +346,13 @@ class InstrumentService:
 
         if "equipment_id" in patch:
             eq_id = patch.get("equipment_id")
-            if eq_id is None:
-                row.equipment_id = None
+            if eq_id is None or eq_id == 0:
+                raise ValueError("equipment is required")
             else:
                 eq_id_int = int(eq_id)
-                if db.query(Equipment.id).filter(Equipment.id == eq_id_int).one_or_none() is None:
-                    raise ValueError("equipment not found")
+                equipment_exists = db.query(Equipment.id).filter(Equipment.id == eq_id_int).one_or_none()
+                if not equipment_exists:
+                    self._ensure_equipment_from_config(db, eq_id_int)
                 row.equipment_id = eq_id_int
 
         if "vendor_id" in patch:

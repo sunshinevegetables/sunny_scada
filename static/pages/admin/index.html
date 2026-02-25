@@ -19,7 +19,8 @@
           <a href="#roles" data-view="roles" class="nav-link">Roles</a>
           <a href="#plc" data-view="plc" class="nav-link">PLC Builder</a>
           <a href="#instruments" data-view="instruments" class="nav-link">Instruments</a>
-          <a href="#meta" data-view="meta" class="nav-link">Datapoint Meta</a>
+          <a href="#maintenance-assets" data-view="maintenance-assets" class="nav-link">Maintenance Assets</a>
+          <a href="#meta" data-view="meta" class="nav-link">Meta</a>
           <a href="#access" data-view="access" class="nav-link">Access Control</a>
           <a href="#alarms" data-view="alarms" class="nav-link">Manage Alarms</a>
           <a href="#alarm-log" data-view="alarm-log" class="nav-link">Alarm Log</a>
@@ -258,88 +259,128 @@
             </dialog>
           </section>
 
-          <!-- DATAPOINT META -->
+          <!-- MAINTENANCE ASSETS -->
+          <section id="view-maintenance-assets" class="view hidden">
+            <div class="view-header">
+              <h2>Maintenance Assets</h2>
+              <div class="actions">
+                <button id="btn-maint-assets-refresh" class="btn">Refresh</button>
+                <button id="btn-maint-assets-add-root" class="btn primary">Add Root Asset</button>
+              </div>
+            </div>
+
+            <div id="maintenance-assets-status" class="status"></div>
+            <div class="panel">
+              <div id="maintenance-assets-tree" class="tree"></div>
+            </div>
+
+            <dialog id="modal-maintenance-asset" class="modal">
+              <form method="dialog" class="modal-body" id="form-maintenance-asset">
+                <h3 id="maintenance-asset-modal-title">Maintenance Asset</h3>
+                <input type="hidden" name="asset_id" />
+
+                <div class="split" style="grid-template-columns: 1fr 1fr">
+                  <label>
+                    Name
+                    <input name="name" class="input" required />
+                  </label>
+                  <label>
+                    Parent
+                    <select name="parent_id" id="maintenance-asset-parent" class="input">
+                      <option value="">(No Parent)</option>
+                    </select>
+                  </label>
+                  <label>
+                    Location
+                    <input name="location" class="input" />
+                  </label>
+                  <label>
+                    Vendor ID
+                    <input name="vendor_id" type="number" min="1" step="1" class="input" />
+                  </label>
+                  <label>
+                    Asset Category
+                    <select name="asset_category" class="input">
+                      <option value="">(Not Set)</option>
+                      <option value="refrigeration">refrigeration</option>
+                      <option value="processing">processing</option>
+                      <option value="utility">utility</option>
+                      <option value="cip">cip</option>
+                    </select>
+                  </label>
+                  <label>
+                    Asset Type
+                    <input name="asset_type" class="input" placeholder="compressor / line / machine / ..." />
+                  </label>
+                  <label>
+                    Criticality
+                    <select name="criticality" class="input">
+                      <option value="A">A</option>
+                      <option value="B" selected>B</option>
+                      <option value="C">C</option>
+                    </select>
+                  </label>
+                  <label>
+                    Duty Cycle (hours/day)
+                    <input name="duty_cycle_hours_per_day" type="number" min="0" step="any" class="input" />
+                  </label>
+                  <label>
+                    Spares Class
+                    <select name="spares_class" class="input">
+                      <option value="fast_moving">fast_moving</option>
+                      <option value="standard" selected>standard</option>
+                      <option value="long_lead">long_lead</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  Description
+                  <textarea name="description" rows="3" class="input"></textarea>
+                </label>
+
+                <div class="muted" style="margin-top: 8px">Safety Classification</div>
+                <div class="row" style="flex-wrap: wrap; gap: 12px; margin-top: 6px">
+                  <label><input type="checkbox" name="safety_classification" value="pressure_vessel" /> pressure_vessel</label>
+                  <label><input type="checkbox" name="safety_classification" value="rotating" /> rotating</label>
+                  <label><input type="checkbox" name="safety_classification" value="electrical" /> electrical</label>
+                  <label><input type="checkbox" name="safety_classification" value="ammonia_exposure" /> ammonia_exposure</label>
+                  <label><input type="checkbox" name="safety_classification" value="confined_space" /> confined_space</label>
+                </div>
+
+                <div class="row right" style="margin-top: 12px">
+                  <button class="btn" value="cancel">Cancel</button>
+                  <button class="btn primary" value="default">Save</button>
+                </div>
+                <div id="maintenance-asset-modal-status" class="status"></div>
+              </form>
+            </dialog>
+          </section>
+
+          <!-- META -->
           <section id="view-meta" class="view hidden">
             <div class="view-header">
-              <h2>Datapoint Meta</h2>
+              <h2>Meta</h2>
               <div class="actions">
                 <button id="btn-meta-refresh" class="btn">Refresh</button>
               </div>
             </div>
 
-            <div class="split">
-              <div class="panel">
-                <div class="row">
-                  <h3>Classes</h3>
-                  <div class="actions">
-                    <button id="btn-dpclass-new" class="btn primary">New</button>
-                    <button id="btn-dpclass-refresh" class="btn">Refresh</button>
-                  </div>
-                </div>
-                <div id="dpclass-status" class="status"></div>
-                <div class="table-wrap">
-                  <table class="table" id="dpclass-table">
-                    <thead>
-                      <tr>
-                        <th style="width: 70px">ID</th>
-                        <th>Name</th>
-                        <th>Description</th>
-                        <th style="width: 220px">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div class="panel">
-                <div class="row">
-                  <h3>Units</h3>
-                  <div class="actions">
-                    <button id="btn-dpunit-new" class="btn primary">New</button>
-                    <button id="btn-dpunit-refresh" class="btn">Refresh</button>
-                  </div>
-                </div>
-                <div id="dpunit-status" class="status"></div>
-                <div class="table-wrap">
-                  <table class="table" id="dpunit-table">
-                    <thead>
-                      <tr>
-                        <th style="width: 70px">ID</th>
-                        <th>Name</th>
-                        <th>Description</th>
-                        <th style="width: 220px">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-              </div>
+            <div class="toolbar">
+              <label style="display: inline-flex; align-items: center; gap: 8px;">
+                <span class="muted">Domain</span>
+                <select id="meta-domain" class="input">
+                  <option value="datapoint">Datapoint</option>
+                  <option value="plc">PLC</option>
+                  <option value="container">Container</option>
+                  <option value="equipment">Equipment</option>
+                </select>
+              </label>
+              <div id="meta-domain-hint" class="hint muted"></div>
             </div>
 
-            <div class="panel" style="margin-top: 16px">
-              <div class="row">
-                <h3>Groups</h3>
-                <div class="actions">
-                  <button id="btn-dpgroup-new" class="btn primary">New</button>
-                  <button id="btn-dpgroup-refresh" class="btn">Refresh</button>
-                </div>
-              </div>
-              <div id="dpgroup-status" class="status"></div>
-              <div class="table-wrap">
-                <table class="table" id="dpgroup-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 70px">ID</th>
-                      <th>Name</th>
-                      <th>Description</th>
-                      <th style="width: 220px">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
+            <div id="meta-status" class="status"></div>
+            <div id="meta-sections"></div>
           </section>
 
           <!-- ALARMS -->
@@ -611,6 +652,12 @@
           Port
           <input name="port" type="number" min="1" max="65535" value="502" required />
         </label>
+        <label>
+          Group
+          <select name="groupId">
+            <option value="">(none)</option>
+          </select>
+        </label>
         <div class="row right">
           <button class="btn" value="cancel">Cancel</button>
           <button class="btn primary" id="btn-plc-create" value="default">Create</button>
@@ -707,6 +754,7 @@
             <select id="instrument-equipment" name="equipment_id" class="input">
               <option value="">Select equipment</option>
             </select>
+            <div id="instrument-equipment-path" class="hint muted">Path: -</div>
           </label>
           <label>
             Location
@@ -756,11 +804,11 @@
       </form>
     </dialog>
 
-    <dialog id="modal-instrument-detail" class="modal">
-      <div class="modal-body">
+    <dialog id="modal-instrument-detail" class="modal instrument-detail-modal">
+      <div class="modal-body instrument-detail-body">
         <h3 id="instrument-detail-title">Instrument Detail</h3>
 
-        <div class="row" style="gap: 8px; flex-wrap: wrap; margin-bottom: 10px">
+        <div class="instrument-detail-tabs">
           <button type="button" class="btn small primary" data-tab="overview">Overview</button>
           <button type="button" class="btn small" data-tab="mapping">Datapoint Mapping</button>
           <button type="button" class="btn small" data-tab="health">Health</button>
@@ -769,7 +817,7 @@
           <button type="button" class="btn small" data-tab="workorders">Work Orders</button>
         </div>
 
-        <div id="instrument-detail-tab-overview">
+        <div id="instrument-detail-tab-overview" class="instrument-detail-panel">
           <div class="split" style="grid-template-columns: 1fr 1fr">
             <label>
               Instrument Code
@@ -814,9 +862,9 @@
           </div>
         </div>
 
-        <div id="instrument-detail-tab-mapping" class="hidden">
+        <div id="instrument-detail-tab-mapping" class="hidden instrument-detail-panel">
           <div class="muted" style="margin-bottom: 8px">Current Mappings</div>
-          <div class="table-wrap" style="margin-bottom: 12px">
+          <div class="table-wrap instrument-detail-table-wrap" style="margin-bottom: 12px">
             <table class="table" id="instrument-detail-mapping-table">
               <thead>
                 <tr>
@@ -868,8 +916,8 @@
           </div>
           <div id="instrument-detail-mapping-status" class="status"></div>
         </div>
-        <div id="instrument-detail-tab-health" class="hidden">
-          <div class="row" style="justify-content: space-between; align-items: center">
+        <div id="instrument-detail-tab-health" class="hidden instrument-detail-panel">
+          <div class="row instrument-detail-toolbar">
             <div class="muted">Instrument Health</div>
             <button type="button" class="btn small" id="btn-instrument-detail-health-refresh">Refresh Health</button>
           </div>
@@ -937,12 +985,12 @@
 
           <div id="instrument-detail-health-status" class="status"></div>
         </div>
-        <div id="instrument-detail-tab-calibration" class="hidden">
-          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+        <div id="instrument-detail-tab-calibration" class="hidden instrument-detail-panel">
+          <div class="instrument-detail-toolbar">
             <div id="calibration-status-banner"></div>
             <button type="button" class="btn small" id="btn-calibration-add">+ Add</button>
           </div>
-          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+          <div class="scrollable-table instrument-detail-scrollable-table">
             <table class="compact">
               <thead>
                 <tr>
@@ -959,13 +1007,13 @@
               <tbody id="calibration-table-body"></tbody>
             </table>
           </div>
-          <div id="calibration-status" class="status" style="margin-top: 12px;"></div>
+          <div id="calibration-status" class="status instrument-detail-status"></div>
         </div>
-        <div id="instrument-detail-tab-spares" class="hidden">
-          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+        <div id="instrument-detail-tab-spares" class="hidden instrument-detail-panel">
+          <div class="instrument-detail-toolbar">
             <button type="button" class="btn small" id="btn-spares-add">+ Add Spare</button>
           </div>
-          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+          <div class="scrollable-table instrument-detail-scrollable-table">
             <table class="compact">
               <thead>
                 <tr>
@@ -978,13 +1026,13 @@
               <tbody id="spares-table-body"></tbody>
             </table>
           </div>
-          <div id="spares-status" class="status" style="margin-top: 12px;"></div>
+          <div id="spares-status" class="status instrument-detail-status"></div>
         </div>
-        <div id="instrument-detail-tab-workorders" class="hidden">
-          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+        <div id="instrument-detail-tab-workorders" class="hidden instrument-detail-panel">
+          <div class="instrument-detail-toolbar">
             <button type="button" class="btn small" id="btn-workorder-add">+ Create Work Order</button>
           </div>
-          <div class="scrollable-table" style="max-height: 400px; overflow-y: auto;">
+          <div class="scrollable-table instrument-detail-scrollable-table">
             <table class="compact">
               <thead>
                 <tr>
@@ -1000,7 +1048,7 @@
               <tbody id="workorders-table-body"></tbody>
             </table>
           </div>
-          <div id="workorders-status" class="status" style="margin-top: 12px;"></div>
+          <div id="workorders-status" class="status instrument-detail-status"></div>
         </div>
 
         <div class="row right" style="margin-top: 12px">
@@ -1176,6 +1224,7 @@
     <dialog id="modal-meta-option" class="modal">
       <form method="dialog" class="modal-body" id="form-meta-option">
         <h3 id="modal-meta-title">Option</h3>
+        <input type="hidden" name="domain" />
         <input type="hidden" name="kind" />
         <input type="hidden" name="id" />
 
@@ -1301,6 +1350,6 @@
     </dialog>
 
     <div id="toast" class="toast hidden"></div>
-    <script src="/scripts/admin.js?v=20260241"></script>
+    <script src="/scripts/admin.js?v=20260242"></script>
   </body>
 </html>

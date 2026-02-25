@@ -200,6 +200,24 @@ def test_instrument_datapoint_mapping_and_calibration(client: TestClient, admin_
     cal = cal_add.json()
     assert cal["method"] == "bench"
 
+    cal_add_ui_strings = client.post(
+        f"/maintenance/instruments/{instrument_id}/calibrations",
+        headers=_auth(admin_token),
+        json={
+            "method": "6.5 Digit Precision Multimeter",
+            "result": "Pass",
+            "as_found": "+0.5%",
+            "as_left": "",
+            "performed_by": "Bharti Automation Pvt Ltd",
+            "certificate_no": "BA/2025/04/04/4/24",
+            "notes": "Additional notes...",
+        },
+    )
+    assert cal_add_ui_strings.status_code == 200, cal_add_ui_strings.text
+    cal_ui = cal_add_ui_strings.json()
+    assert cal_ui["as_found"] == 0.5
+    assert cal_ui["as_left"] is None
+
     cal_list = client.get(f"/maintenance/instruments/{instrument_id}/calibrations", headers=_auth(admin_token))
     assert cal_list.status_code == 200
     assert len(cal_list.json()) >= 1

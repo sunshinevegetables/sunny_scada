@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from sunny_scada.api.errors import register_error_handlers
-from sunny_scada.api.middleware import AuthEnforcementMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from sunny_scada.api.middleware import AuthEnforcementMiddleware, RequestSizeLimitMiddleware, SecurityHeadersMiddleware, WatchRateLimitMiddleware
 from sunny_scada.core.settings import Settings
 from sunny_scada.data_storage import DataStorage
 from sunny_scada.db.base import Base
@@ -43,6 +43,7 @@ from sunny_scada.services.alarm_monitor import AlarmMonitor
 from sunny_scada.services.rate_limiter import RateLimiter
 from sunny_scada.services.retention_service import RetentionService
 from sunny_scada.services.access_control_service import AccessControlService
+from sunny_scada.services.watch_service import WatchService
 
 from sunny_scada.api.routers import (
     health,
@@ -66,6 +67,7 @@ from sunny_scada.api.routers import (
     admin_alarm_log,
     frontend_alarms,
     instruments,
+    watch,
 )
 from sunny_scada.api.deps import require_permission
 
@@ -261,6 +263,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             writer=app.state.plc_writer,
         )
 
+        app.state.watch_service = WatchService(
+            storage=app.state.storage,
+            access_control=app.state.access_control_service,
+            stale_after_s=settings.watch_stale_after_s,
+        )
+
         # --- Cycle 2 services ---
         app.state.rate_limiter = RateLimiter()
         app.state.command_executor = CommandExecutor(
@@ -400,6 +408,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Middleware
     app.add_middleware(RequestSizeLimitMiddleware, max_bytes=settings.max_request_size_bytes)
     app.add_middleware(AuthEnforcementMiddleware)
+    app.add_middleware(WatchRateLimitMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
     # CORS
@@ -474,6 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(maintenance.router)
     app.include_router(instruments.router)
     app.include_router(trends.router)
+    app.include_router(watch.router)
 
     # System config (DB-backed PLC/Container/Equipment/Datapoints)
     app.include_router(system_config.router)

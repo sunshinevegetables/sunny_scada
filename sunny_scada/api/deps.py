@@ -21,6 +21,7 @@ from sunny_scada.services.rate_limiter import RateLimiter
 from sunny_scada.api.security import Principal
 from sunny_scada.services.access_control_service import AccessControlService
 from sunny_scada.services.system_config_service import SystemConfigService
+from sunny_scada.services.watch_service import WatchService
 from sunny_scada.db.models import AppClient, User
 
 
@@ -99,6 +100,10 @@ def get_access_control_service(request: Request) -> AccessControlService:
 
 def get_system_config_service(request: Request, settings: Settings = Depends(get_settings)) -> SystemConfigService:
     return SystemConfigService(digital_bit_max=settings.digital_bit_max)
+
+
+def get_watch_service(request: Request) -> WatchService:
+    return request.app.state.watch_service
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -189,6 +194,30 @@ def get_current_user_optional(
     except HTTPException:
         return None
     return p.user if p.type == "user" else None
+
+
+def get_current_watch_principal(
+    request: Request,
+    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: Session = Depends(get_db),
+    auth: AuthService = Depends(get_auth_service),
+) -> Principal:
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = auth.decode_access_token_payload(creds.credentials)
+    except InvalidToken:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if str(payload.get("scope") or "").strip().lower() != "watch":
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, Principal):
+        return principal
+
+    return get_current_principal(request, creds, db, auth)
 
 
 def require_permission(permission: str):

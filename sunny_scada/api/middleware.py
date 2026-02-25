@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -161,6 +163,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             or request.url.path.startswith("/oauth")
             or request.url.path.startswith("/admin")
             or request.url.path.startswith("/config")
+            or request.url.path.startswith("/api/watch")
         ):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
@@ -182,3 +185,50 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
             except Exception:
                 pass
         return await call_next(request)
+
+
+class WatchRateLimitMiddleware(BaseHTTPMiddleware):
+    """Rate-limit /api/watch/* requests for watch-scoped tokens."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/watch/"):
+            return await call_next(request)
+
+        if path == "/api/watch/token":
+            return await call_next(request)
+
+        settings = getattr(request.app.state, "settings", None)
+        limiter = getattr(request.app.state, "rate_limiter", None)
+        auth = getattr(request.app.state, "auth_service", None)
+        if not settings or limiter is None or auth is None:
+            return await call_next(request)
+
+        raw = (request.headers.get("authorization") or "").strip()
+        if not raw.lower().startswith("bearer "):
+            return await call_next(request)
+
+        token = raw.split(" ", 1)[1].strip()
+        if not token:
+            return await call_next(request)
+
+        try:
+            payload = auth.decode_access_token_payload(token)
+        except Exception:
+            return await call_next(request)
+
+        if str(payload.get("scope") or "").strip().lower() != "watch":
+            return await call_next(request)
+
+        rpm = max(50, min(100, int(getattr(settings, "watch_rate_limit_per_minute", 90))))
+        key = "watch:" + hashlib.sha1(token.encode("utf-8")).hexdigest()
+        limit = limiter.allow(key, limit=rpm, window_s=60)
+        if not limit.allowed:
+            from starlette.responses import JSONResponse
+
+            return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+
+        response = await call_next(request)
+        response.headers.setdefault("X-RateLimit-Remaining", str(limit.remaining))
+        response.headers.setdefault("X-RateLimit-Reset", str(int(limit.reset_after_s)))
+        return response

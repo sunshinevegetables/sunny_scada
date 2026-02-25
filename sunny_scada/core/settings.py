@@ -140,6 +140,11 @@ class Settings:
     # Rate limiting for commands
     command_rate_limit_per_minute: int = field(default_factory=lambda: _env_int("COMMAND_RATE_LIMIT_PER_MIN", "30"))
 
+    # Garmin watch API
+    watch_token_ttl_hours: int = field(default_factory=lambda: _env_int("WATCH_TOKEN_TTL_HOURS", "48"))
+    watch_rate_limit_per_minute: int = field(default_factory=lambda: _env_int("WATCH_RATE_LIMIT_PER_MIN", "90"))
+    watch_stale_after_s: int = field(default_factory=lambda: _env_int("WATCH_STALE_AFTER_S", "120"))
+
     # Digital datapoint bit range (system config module)
     digital_bit_max: int = field(default_factory=lambda: _env_int("DIGITAL_BIT_MAX", "15"))
 

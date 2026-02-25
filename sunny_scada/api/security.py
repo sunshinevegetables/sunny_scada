@@ -81,6 +81,8 @@ def is_path_allowlisted(path: str, *, env: str) -> bool:
     # Auth/token issuance
     if path == "/auth/login" or path == "/auth/refresh" or path == "/oauth/token":
         return True
+    if path == "/api/watch/token":
+        return True
 
     # Health endpoint (minimal)
     if path == "/health":

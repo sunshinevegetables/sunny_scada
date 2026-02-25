@@ -298,6 +298,34 @@ class AuthService:
         token = jwt.encode(payload, self._jwt_secret_key, algorithm="HS256")
         return token, access_expires
 
+    def issue_user_access_token(
+        self,
+        *,
+        user: User,
+        ttl_s: int | None = None,
+        scope: str = "",
+    ) -> tuple[str, dt.datetime]:
+        now = dt.datetime.now(dt.timezone.utc)
+        access_expires = now + dt.timedelta(seconds=int(ttl_s or self._access_ttl_s))
+        payload: dict[str, Any] = {
+            "iss": self._jwt_issuer,
+            "aud": self._jwt_audience if self._jwt_audience else None,
+            "sub": str(user.id),
+            "prt": "user",
+            "typ": "access",
+            "jti": secrets.token_urlsafe(16),
+            "username": user.username,
+            "scope": str(scope or "").strip(),
+            "iat": int(now.timestamp()),
+            "exp": int(access_expires.timestamp()),
+        }
+        if payload.get("aud") is None:
+            payload.pop("aud", None)
+        if not payload.get("scope"):
+            payload.pop("scope", None)
+        token = jwt.encode(payload, self._jwt_secret_key, algorithm="HS256")
+        return token, access_expires
+
     @staticmethod
     def expand_permissions(perms: Iterable[str]) -> set[str]:
         """Support wildcard permissions like alarms:*"""

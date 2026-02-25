@@ -19,8 +19,10 @@ from sunny_scada.db.models import (
     Vendor,
     WorkOrder,
 )
+from sunny_scada.services.maintenance_equipment_service import MaintenanceEquipmentService
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+_equipment_service = MaintenanceEquipmentService()
 
 
 def _now() -> dt.datetime:
@@ -176,6 +178,13 @@ class EquipmentIn(BaseModel):
     location: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
     vendor_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    asset_category: Optional[str] = Field(default=None, max_length=50)
+    asset_type: Optional[str] = Field(default=None, max_length=100)
+    criticality: str = Field(default="B", max_length=10)
+    duty_cycle_hours_per_day: Optional[float] = None
+    spares_class: str = Field(default="standard", max_length=30)
+    safety_classification: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -188,7 +197,28 @@ def create_equipment(
     audit=Depends(get_audit_service),
     _perm=Depends(require_permission("maintenance:write")),
 ):
-    eq = Equipment(equipment_code="", name=req.name, location=req.location, description=req.description, vendor_id=req.vendor_id, is_active=True, meta=req.meta)
+    payload = req.model_dump()
+    try:
+        payload = _equipment_service.validate_payload(db, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    eq = Equipment(
+        equipment_code="",
+        name=req.name,
+        location=req.location,
+        description=req.description,
+        vendor_id=req.vendor_id,
+        parent_id=payload.get("parent_id"),
+        asset_category=payload.get("asset_category"),
+        asset_type=payload.get("asset_type"),
+        criticality=payload.get("criticality") or "B",
+        duty_cycle_hours_per_day=payload.get("duty_cycle_hours_per_day"),
+        spares_class=payload.get("spares_class") or "standard",
+        safety_classification=payload.get("safety_classification") or [],
+        is_active=True,
+        meta=req.meta,
+    )
     db.add(eq)
     db.flush()
     eq.equipment_code = f"EQ-{eq.id:06d}"
@@ -198,7 +228,7 @@ def create_equipment(
         audit.log(db, action="maintenance.equipment.create", user_id=user.id, client_ip=request.client.host if request.client else None, resource=eq.equipment_code, metadata={"id": eq.id})
     except Exception:
         pass
-    return {"id": eq.id, "equipment_code": eq.equipment_code}
+    return _equipment_service.equipment_out(eq)
 
 
 @router.get("/equipment")
@@ -207,7 +237,16 @@ def list_equipment(
     _perm=Depends(require_permission("maintenance:read")),
 ):
     rows = db.query(Equipment).order_by(Equipment.id.asc()).all()
-    return [{"id": e.id, "equipment_code": e.equipment_code, "name": e.name, "location": e.location, "is_active": e.is_active, "vendor_id": e.vendor_id, "meta": e.meta} for e in rows]
+    return [_equipment_service.equipment_out(e) for e in rows]
+
+
+@router.get("/equipment/tree")
+def equipment_tree(
+    root_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    return _equipment_service.build_tree(db, root_id=root_id)
 
 
 @router.get("/equipment/{equipment_id}")
@@ -219,7 +258,7 @@ def get_equipment(
     e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
     if not e:
         raise HTTPException(status_code=404, detail="Not found")
-    return {"id": e.id, "equipment_code": e.equipment_code, "name": e.name, "location": e.location, "description": e.description, "vendor_id": e.vendor_id, "is_active": e.is_active, "meta": e.meta}
+    return _equipment_service.equipment_out(e)
 
 
 @router.put("/equipment/{equipment_id}")
@@ -235,10 +274,23 @@ def update_equipment(
     e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
     if not e:
         raise HTTPException(status_code=404, detail="Not found")
+    payload = req.model_dump()
+    try:
+        payload = _equipment_service.validate_payload(db, payload=payload, equipment_id=int(equipment_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     e.name = req.name
     e.location = req.location
     e.description = req.description
     e.vendor_id = req.vendor_id
+    e.parent_id = payload.get("parent_id")
+    e.asset_category = payload.get("asset_category")
+    e.asset_type = payload.get("asset_type")
+    e.criticality = payload.get("criticality") or "B"
+    e.duty_cycle_hours_per_day = payload.get("duty_cycle_hours_per_day")
+    e.spares_class = payload.get("spares_class") or "standard"
+    e.safety_classification = payload.get("safety_classification") or []
     e.meta = req.meta
     db.add(e)
     db.commit()
@@ -246,7 +298,33 @@ def update_equipment(
         audit.log(db, action="maintenance.equipment.update", user_id=user.id, client_ip=request.client.host if request.client else None, resource=e.equipment_code, metadata={"id": e.id})
     except Exception:
         pass
-    return {"status": "ok"}
+    return {"status": "ok", "equipment": _equipment_service.equipment_out(e)}
+
+
+@router.get("/equipment/{equipment_id}/path")
+def equipment_path(
+    equipment_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    try:
+        path = _equipment_service.equipment_path(db, equipment_id=int(equipment_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"path": path}
+
+
+@router.get("/equipment/{equipment_id}/descendants")
+def equipment_descendants(
+    equipment_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    try:
+        descendants = _equipment_service.descendants(db, equipment_id=int(equipment_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"equipment_id": int(equipment_id), "descendants": descendants}
 
 
 @router.delete("/equipment/{equipment_id}")

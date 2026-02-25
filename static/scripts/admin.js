@@ -301,6 +301,9 @@
       units: [],
       groups: [],
       loaded: false,
+      currentDomain: "datapoint",
+      loadedByDomain: {},
+      catalog: {},
     },
 
     access: {
@@ -337,27 +340,91 @@
   };
 
   // -----------------------------
-  // Datapoint meta options (classes / units / groups)
+  // Meta options by domain
   // -----------------------------
-  const META_KIND = {
-    class: { label: "Class", endpoint: "/api/config/datapoint-classes" },
-    unit: { label: "Unit", endpoint: "/api/config/datapoint-units" },
-    group: { label: "Group", endpoint: "/api/config/datapoint-groups" },
+  const META_DEFINITIONS = {
+    datapoint: {
+      label: "Datapoint",
+      hint: "Configure shared classes, units, and groups (groups apply across PLC/container/equipment/datapoints).",
+      kinds: {
+        class: { label: "Class", endpoint: "/api/config/datapoint-classes" },
+        unit: { label: "Unit", endpoint: "/api/config/datapoint-units" },
+        group: { label: "Group", endpoint: "/api/config/datapoint-groups" },
+      },
+    },
+    plc: {
+      label: "PLC",
+      hint: "PLC group assignment is configured in PLC Builder using shared datapoint groups.",
+      kinds: {},
+    },
+    container: {
+      label: "Container",
+      hint: "Manage container type options. Containers also use shared datapoint groups from Datapoint Meta.",
+      kinds: {
+        type: { label: "Type", endpoint: "/api/config/container-types" },
+      },
+    },
+    equipment: {
+      label: "Equipment",
+      hint: "Manage equipment type options. Equipment also uses shared datapoint groups from Datapoint Meta.",
+      kinds: {
+        type: { label: "Type", endpoint: "/api/config/equipment-types" },
+      },
+    },
   };
 
-  async function ensureMetaLoaded(force = false) {
-    if (state.meta.loaded && !force) return;
-    // These endpoints are protected by config:read / config:write.
-    const [classes, units, groups] = await Promise.all([
-      api.get(META_KIND.class.endpoint),
-      api.get(META_KIND.unit.endpoint),
-      api.get(META_KIND.group.endpoint),
-    ]);
+  function getMetaDomain(domain) {
+    return META_DEFINITIONS[domain] || META_DEFINITIONS.datapoint;
+  }
 
-    state.meta.classes = Array.isArray(classes) ? classes : [];
-    state.meta.units = Array.isArray(units) ? units : [];
-    state.meta.groups = Array.isArray(groups) ? groups : [];
-    state.meta.loaded = true;
+  function getMetaKindDef(domain, kind) {
+    return getMetaDomain(domain)?.kinds?.[kind] || null;
+  }
+
+  function getMetaItems(domain, kind) {
+    if (domain === "datapoint") {
+      if (kind === "class") return state.meta.classes || [];
+      if (kind === "unit") return state.meta.units || [];
+      if (kind === "group") return state.meta.groups || [];
+    }
+    return state.meta.catalog?.[domain]?.[kind] || [];
+  }
+
+  async function ensureMetaDomainLoaded(domain = "datapoint", force = false) {
+    const selectedDomain = META_DEFINITIONS[domain] ? domain : "datapoint";
+    if (!force && state.meta.loadedByDomain?.[selectedDomain]) return;
+
+    const domainDef = getMetaDomain(selectedDomain);
+    const kindEntries = Object.entries(domainDef.kinds || {});
+
+    if (!kindEntries.length) {
+      state.meta.catalog[selectedDomain] = {};
+      state.meta.loadedByDomain[selectedDomain] = true;
+      return;
+    }
+
+    const responses = await Promise.all(
+      kindEntries.map(async ([kind, def]) => {
+        if (!def?.endpoint) return [kind, []];
+        const items = await api.get(def.endpoint);
+        return [kind, Array.isArray(items) ? items : []];
+      })
+    );
+
+    const byKind = Object.fromEntries(responses);
+    state.meta.catalog[selectedDomain] = byKind;
+    state.meta.loadedByDomain[selectedDomain] = true;
+
+    if (selectedDomain === "datapoint") {
+      state.meta.classes = byKind.class || [];
+      state.meta.units = byKind.unit || [];
+      state.meta.groups = byKind.group || [];
+      state.meta.loaded = true;
+    }
+  }
+
+  async function ensureMetaLoaded(force = false) {
+    await ensureMetaDomainLoaded("datapoint", force);
   }
 
     // -----------------------------
@@ -410,6 +477,8 @@
       { view: "users", ok: can(p, "users:admin") },
       { view: "roles", ok: can(p, "roles:admin") },
       { view: "plc", ok: can(p, "config:read") || can(p, "config:write") },
+      { view: "instruments", ok: can(p, "maintenance:read") || can(p, "maintenance:write") },
+      { view: "maintenance-assets", ok: can(p, "maintenance:read") || can(p, "maintenance:write") },
       { view: "meta", ok: can(p, "config:read") || can(p, "config:write") },
       { view: "alarms", ok: can(p, "alarms:admin") },
       { view: "access", ok: can(p, "users:admin") || can(p, "roles:admin") },
@@ -442,6 +511,8 @@
     if (target === "alarms" && !can(state.perms, "alarms:admin")) return navigate(firstAllowedView());
     if (target === "access" && !(can(state.perms, "users:admin") || can(state.perms, "roles:admin")))
       return navigate(firstAllowedView());
+    if (target === "maintenance-assets" && !(can(state.perms, "maintenance:read") || can(state.perms, "maintenance:write")))
+      return navigate(firstAllowedView());
     if (target === "alarm-log" && !can(state.perms, "alarms:admin")) return navigate(firstAllowedView());
     if (target === "command-log" && !(can(state.perms, "command:read") || can(state.perms, "command:write")))
       return navigate(firstAllowedView());
@@ -452,6 +523,7 @@
     if (target === "roles") await rolesView.show();
     if (target === "plc") await plcView.show();
     if (target === "instruments") await instrumentsView.show();
+    if (target === "maintenance-assets") await maintenanceAssetsView.show();
     if (target === "meta") await metaView.show();
     if (target === "alarms") await alarmsView.show();
     if (target === "access") await accessView.show(query);
@@ -1414,7 +1486,9 @@
 
     function bind() {
       $("btn-plc-refresh")?.addEventListener("click", () => loadTree(true));
-      $("btn-plc-add")?.addEventListener("click", () => openDialog("modal-plc"));
+      $("btn-plc-add")?.addEventListener("click", async () => {
+        await openPlcModal();
+      });
       $("cfg-search")?.addEventListener("input", () => renderTree());
 
       $("cfg-tree")?.addEventListener("click", (ev) => {
@@ -1466,6 +1540,26 @@
         ev.preventDefault();
         await saveDatapointInstrumentLink();
       });
+    }
+
+    async function openPlcModal() {
+      const form = $("form-plc");
+      if (!form) return;
+      try {
+        await ensureMetaLoaded(false);
+      } catch {
+        // keep PLC create usable without groups
+      }
+
+      const groupSel = form.querySelector('select[name="groupId"]');
+      if (groupSel) {
+        groupSel.innerHTML = "";
+        groupSel.appendChild(el("option", { value: "", text: "(none)" }));
+        for (const g of state.meta.groups || []) {
+          groupSel.appendChild(el("option", { value: String(g.id), text: g.name }));
+        }
+      }
+      openDialog("modal-plc");
     }
 
     function getSelectedEquipmentInfo() {
@@ -1985,6 +2079,50 @@
       const input = (name, value, attrs = {}) =>
         el("input", { name, value: value ?? "", ...attrs });
 
+      const containerTypeSelect = (selectedValue = "") => {
+        const options = [el("option", { value: "", text: "Select type" })];
+        const knownValues = new Set();
+
+        const managed = getMetaItems("container", "type") || [];
+        for (const item of managed) {
+          const name = String(item?.name || "").trim();
+          if (!name) continue;
+          knownValues.add(name);
+          options.push(el("option", { value: name, text: name }));
+        }
+
+        const selected = String(selectedValue || "").trim();
+        if (selected && !knownValues.has(selected)) {
+          options.push(el("option", { value: selected, text: `${selected} (custom)` }));
+        }
+
+        const sel = el("select", { name: "type" }, options);
+        sel.value = selected;
+        return sel;
+      };
+
+      const equipmentTypeSelect = (selectedValue = "") => {
+        const options = [el("option", { value: "", text: "Select type" })];
+        const knownValues = new Set();
+
+        const managed = getMetaItems("equipment", "type") || [];
+        for (const item of managed) {
+          const name = String(item?.name || "").trim();
+          if (!name) continue;
+          knownValues.add(name);
+          options.push(el("option", { value: name, text: name }));
+        }
+
+        const selected = String(selectedValue || "").trim();
+        if (selected && !knownValues.has(selected)) {
+          options.push(el("option", { value: selected, text: `${selected} (custom)` }));
+        }
+
+        const sel = el("select", { name: "type" }, options);
+        sel.value = selected;
+        return sel;
+      };
+
       if (info.type === "plc") {
         fields.push(inputRow("Name", input("name", node.name)));
         fields.push(inputRow("IP", input("ip", node.ip, { placeholder: "192.168.0.10" })));
@@ -1994,9 +2132,20 @@
             input("port", node.port, { type: "number", min: "1", max: "65535" })
           )
         );
+        if (!state.meta.loaded) {
+          ensureMetaLoaded(false).catch(() => {});
+        }
+        const plcGroupSel = el(
+          "select",
+          { name: "groupId" },
+          [el("option", { value: "", text: "(none)" })].concat((state.meta.groups || []).map((g) => el("option", { value: String(g.id), text: g.name })))
+        );
+        plcGroupSel.value = node.groupId ? String(node.groupId) : "";
+        fields.push(el("label", {}, [el("span", { class: "muted", text: "Group" }), plcGroupSel]));
       } else if (info.type === "container") {
         fields.push(inputRow("Name", input("name", node.name)));
-        fields.push(inputRow("Type", input("type", node.containerType || "")));
+        ensureMetaDomainLoaded("container", false).catch(() => {});
+        fields.push(inputRow("Type", containerTypeSelect(node.containerType || "")));
         // Ensure groups are loaded (async; select will populate if already loaded)
         if (!state.meta.loaded) {
           ensureMetaLoaded(false).catch(() => {});
@@ -2010,7 +2159,8 @@
         fields.push(el("label", {}, [el("span", { class: "muted", text: "Group" }), containerGroupSel]));
       } else if (info.type === "equipment") {
         fields.push(inputRow("Name", input("name", node.name)));
-        fields.push(inputRow("Type", input("type", node.equipmentType || "")));
+        ensureMetaDomainLoaded("equipment", false).catch(() => {});
+        fields.push(inputRow("Type", equipmentTypeSelect(node.equipmentType || "")));
         // Ensure groups are loaded (async; select will populate if already loaded)
         if (!state.meta.loaded) {
           ensureMetaLoaded(false).catch(() => {});
@@ -2153,9 +2303,11 @@
       const name = String(fd.get("name") || "").trim();
       const ip = String(fd.get("ip") || "").trim();
       const port = clampInt(fd.get("port"), 502);
+      const groupIdRaw = String(fd.get("groupId") || "").trim();
+      const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
 
       try {
-        await api.post("/api/config/plcs", { json: { name, ip, port } });
+        await api.post("/api/config/plcs", { json: { name, ip, port, groupId } });
         toast("PLC created");
         closeDialog("modal-plc");
         form.reset();
@@ -2185,7 +2337,20 @@
       if (childType === "container") {
         title.textContent = "Add Container";
         fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Name" }), el("input", { name: "name", required: "true" })]));
-        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), el("input", { name: "type", placeholder: "optional" })]));
+        try {
+          await ensureMetaDomainLoaded("container", false);
+        } catch {
+          // keep modal usable even if container type meta load fails
+        }
+
+        const typeOptions = [el("option", { value: "", text: "Select type" })];
+        for (const row of getMetaItems("container", "type") || []) {
+          const v = String(row?.name || "").trim();
+          if (!v) continue;
+          typeOptions.push(el("option", { value: v, text: v }));
+        }
+        const typeSel = el("select", { name: "type", required: "true" }, typeOptions);
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), typeSel]));
 
         // Allow assigning a datapoint group when creating a container
         try {
@@ -2202,7 +2367,19 @@
       } else if (childType === "equipment") {
         title.textContent = "Add Equipment";
         fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Name" }), el("input", { name: "name", required: "true" })]));
-        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), el("input", { name: "type", placeholder: "optional" })]));
+        try {
+          await ensureMetaDomainLoaded("equipment", false);
+        } catch {
+          // keep modal usable even if equipment type meta load fails
+        }
+        const typeOptions = [el("option", { value: "", text: "Select type" })];
+        for (const row of getMetaItems("equipment", "type") || []) {
+          const v = String(row?.name || "").trim();
+          if (!v) continue;
+          typeOptions.push(el("option", { value: v, text: v }));
+        }
+        const typeSel = el("select", { name: "type", required: "true" }, typeOptions);
+        fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Type" }), typeSel]));
 
         // Allow assigning a datapoint group when creating equipment
         try {
@@ -2229,6 +2406,8 @@
           state.meta.classes = [];
           state.meta.units = [];
           state.meta.groups = [];
+          state.meta.loadedByDomain.datapoint = false;
+          state.meta.catalog.datapoint = { class: [], unit: [], group: [] };
         }
 
         fields.appendChild(el("label", {}, [el("span", { class: "muted", text: "Label" }), el("input", { name: "label", required: "true", value: existing?.label || "" })]));
@@ -2495,7 +2674,9 @@
           const name = String(getInput("name")?.value || "").trim();
           const ip = String(getInput("ip")?.value || "").trim();
           const port = clampInt(getInput("port")?.value, 502);
-          await api.patch(`/api/config/plcs/${info.id}`, { json: { name, ip, port } });
+          const groupIdRaw = String(getInput("groupId")?.value || "").trim();
+          const groupId = groupIdRaw ? clampInt(groupIdRaw, 0) : null;
+          await api.patch(`/api/config/plcs/${info.id}`, { json: { name, ip, port, groupId } });
           toast("PLC updated");
         } else if (info.type === "container") {
           const name = String(getInput("name")?.value || "").trim();
@@ -2632,6 +2813,7 @@
     let bulkMapDatapoints = [];
     let bulkMapAllMappings = [];
     let bulkMapDpSearch = "";
+    const equipmentPathCache = new Map();
 
     function bind() {
       const btnRefresh = $("btn-instruments-refresh");
@@ -2640,6 +2822,7 @@
       const bulkMapModal = $("modal-bulk-map");
       const bulkMapDpSearchInput = $("bulk-map-dp-search");
       const form = $("form-instrument");
+      const equipmentSel = $("instrument-equipment");
       const table = $("instruments-table");
       const search = $("instrument-search");
       const filterEquipment = $("instrument-filter-equipment");
@@ -2709,6 +2892,9 @@
         if ((pageIndex + 1) * PAGE_SIZE >= total) return;
         pageIndex += 1;
         renderTable();
+      });
+      equipmentSel?.addEventListener("change", async () => {
+        await updateInstrumentEquipmentPathDisplay(clampInt(equipmentSel.value, 0));
       });
       table?.addEventListener("click", onTableClick);
       detailClose?.addEventListener("click", () => closeDialog("modal-instrument-detail"));
@@ -2857,6 +3043,11 @@
           setStatus("modal-instrument-status", "Instrument code is required.", "error");
           return;
         }
+        const equipmentIdStr = String(form.equipment_id?.value || "").trim();
+        if (!equipmentIdStr || equipmentIdStr === "0") {
+          setStatus("modal-instrument-status", "Equipment is required.", "error");
+          return;
+        }
         try {
           setStatus("modal-instrument-status", "Saving...", "");
           const payload = buildInstrumentPayload(form);
@@ -2910,16 +3101,48 @@
         }
 
         sel.innerHTML = "";
-        sel.appendChild(el("option", { value: "", text: "Select equipment" }));
+        sel.appendChild(el("option", { value: "", text: "-- Select Equipment (required) --" }));
         for (const eq of equipment) {
           const id = clampInt(eq.id, 0);
           const name = String(eq.name || "");
           sel.appendChild(el("option", { value: String(id), text: name }));
         }
+        await updateInstrumentEquipmentPathDisplay(clampInt(sel.value, 0));
       } catch (err) {
         console.error("Failed to load equipment:", err);
         setStatus("modal-instrument-status", `Failed to load equipment: ${err?.message || ""}`, "error");
       }
+    }
+
+    async function loadEquipmentPath(equipmentId) {
+      const id = clampInt(equipmentId, 0);
+      if (!id) return [];
+      if (equipmentPathCache.has(id)) return equipmentPathCache.get(id) || [];
+      try {
+        const resp = await api.get(`/maintenance/equipment/${id}/path`);
+        const path = Array.isArray(resp?.path) ? resp.path : [];
+        equipmentPathCache.set(id, path);
+        return path;
+      } catch {
+        return [];
+      }
+    }
+
+    async function updateInstrumentEquipmentPathDisplay(equipmentId) {
+      const host = $("instrument-equipment-path");
+      if (!host) return;
+      const id = clampInt(equipmentId, 0);
+      if (!id) {
+        host.textContent = "Path: -";
+        return;
+      }
+      const path = await loadEquipmentPath(id);
+      if (!path.length) {
+        host.textContent = "Path: -";
+        return;
+      }
+      const breadcrumb = path.map((n) => String(n?.name || "-")).join(" > ");
+      host.textContent = `Path: ${breadcrumb}`;
     }
 
     async function populateInstrumentEquipmentFilter() {
@@ -3228,7 +3451,25 @@
         const equipmentName = String(inst?.equipment?.name || "-");
         const type = String(inst?.instrument_type || "");
         const pvDatapoint = String(inst?.mapped_datapoints?.[0]?.label || "-");
-        const calibrationDue = String(inst?.meta?.calibration_due || "-");
+        const calibrationDueRaw = inst?.meta?.calibration_due;
+        const calibrationDue = calibrationDueRaw ? new Date(calibrationDueRaw).toLocaleDateString() : "-";
+        
+        // Calculate calibration due status
+        let calibrationBadgeClass = "";
+        if (calibrationDueRaw) {
+          const dueDate = new Date(calibrationDueRaw);
+          const now = new Date();
+          const oneMonthFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+          
+          if (dueDate < now) {
+            calibrationBadgeClass = "error"; // Overdue - red
+          } else if (dueDate <= oneMonthFromNow) {
+            calibrationBadgeClass = "warn"; // Due within 1 month - yellow
+          } else {
+            calibrationBadgeClass = "ok"; // OK - green
+          }
+        }
+        
         const sparesStatus = String(inst?.meta?.spares_status || "-");
         const status = String(inst?.status || "");
 
@@ -3242,7 +3483,9 @@
           el("td", { text: type }),
           el("td", { text: pvDatapoint }),
           healthCell,
-          el("td", { text: calibrationDue }),
+          el("td", {}, calibrationBadgeClass ? [
+            el("span", { class: `badge ${calibrationBadgeClass}`, text: calibrationDue })
+          ] : [calibrationDue]),
           el("td", { text: sparesStatus }),
           el("td", {}, [
             el("span", {
@@ -3675,6 +3918,46 @@
       const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
       if (!instrumentId) return;
 
+      const normalizeNumericInput = (raw) => {
+        const text = String(raw || "").trim();
+        if (!text) return null;
+        const stripped = text.replace(/%/g, "").replace(/^\+/, "").trim();
+        if (!stripped) return null;
+        const num = Number(stripped);
+        if (!Number.isFinite(num)) {
+          throw new Error("As Found/As Left must be numeric values");
+        }
+        return num;
+      };
+
+      const normalizeDateTimeInput = (raw) => {
+        const text = String(raw || "").trim();
+        if (!text) return "";
+        if (text.includes("T")) return text;
+
+        const m = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+        if (m) {
+          const day = m[1].padStart(2, "0");
+          const month = m[2].padStart(2, "0");
+          const year = m[3];
+          const hh = (m[4] || "00").padStart(2, "0");
+          const mm = (m[5] || "00").padStart(2, "0");
+          return `${year}-${month}-${day}T${hh}:${mm}`;
+        }
+
+        const parsed = new Date(text);
+        if (!Number.isNaN(parsed.getTime())) {
+          const yyyy = parsed.getFullYear();
+          const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+          const dd = String(parsed.getDate()).padStart(2, "0");
+          const hh = String(parsed.getHours()).padStart(2, "0");
+          const min = String(parsed.getMinutes()).padStart(2, "0");
+          return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+        }
+
+        return text;
+      };
+
       const ts = String($("calibration-ts")?.value || "").trim();
       const nextDueAt = String($("calibration-next-due-at")?.value || "").trim();
       const method = String($("calibration-method")?.value || "").trim();
@@ -3690,11 +3973,33 @@
         return;
       }
 
-      const payload = { ts, method, result, as_found: asFound, as_left: asLeft, performed_by: performedBy, certificate_no: certificateNo, notes };
-      if (nextDueAt) payload.next_due_at = nextDueAt;
+      const normalizedTs = normalizeDateTimeInput(ts);
+      const normalizedNextDueAt = normalizeDateTimeInput(nextDueAt);
+
+      let normalizedAsFound;
+      let normalizedAsLeft;
+      try {
+        normalizedAsFound = normalizeNumericInput(asFound);
+        normalizedAsLeft = normalizeNumericInput(asLeft);
+      } catch (err) {
+        alert(err?.message || "Invalid calibration value");
+        return;
+      }
+
+      const payload = {
+        ts: normalizedTs,
+        method,
+        result,
+        as_found: normalizedAsFound,
+        as_left: normalizedAsLeft,
+        performed_by: performedBy,
+        certificate_no: certificateNo,
+        notes,
+      };
+      if (normalizedNextDueAt) payload.next_due_at = normalizedNextDueAt;
 
       setStatus("calibration-status", "Saving...", "");
-      await api.post(`/maintenance/instruments/${instrumentId}/calibrations`, payload);
+      await api.post(`/maintenance/instruments/${instrumentId}/calibrations`, { json: payload });
       setStatus("calibration-status", "Calibration saved.", "ok");
     }
 
@@ -4221,7 +4526,7 @@
 
     function buildInstrumentPayload(form) {
       const equipmentIdStr = String(form.equipment_id?.value || "").trim();
-      const equipmentId = equipmentIdStr && equipmentIdStr !== "0" ? clampInt(equipmentIdStr, 0) : null;
+      const equipmentId = clampInt(equipmentIdStr, 0);
       return {
         label: String(form.instrument_code?.value || "").trim(),
         status: String(form.status?.value || "active").trim(),
@@ -4285,6 +4590,7 @@
       form.install_date.value = toDateInputValue(inst.installed_at);
       form.commission_date.value = toDateInputValue(inst.meta?.commission_date);
       form.warranty_expiry.value = toDateInputValue(inst.meta?.warranty_expiry);
+      await updateInstrumentEquipmentPathDisplay(clampInt(form.equipment_id.value, 0));
     }
 
     async function onTableClick(ev) {
@@ -4338,36 +4644,253 @@
       await reloadAndRender();
     }
 
-    return { show };
+    async function openInstrumentDetail(instrumentId) {
+      const id = clampInt(instrumentId, 0);
+      if (!id) return;
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+      await openInstrumentDetailModal(id);
+    }
+
+    return { show, openInstrumentDetail };
   })();
 
-  // -----------------------------
-  // Datapoint meta view
-  // -----------------------------
-  const metaView = (() => {
+  const maintenanceAssetsView = (() => {
     let initialized = false;
+    let assetRows = [];
+    let instrumentRows = [];
+    let editingAsset = null;
 
     function bind() {
-      $("btn-meta-refresh")?.addEventListener("click", () => refresh(true));
+      $("btn-maint-assets-refresh")?.addEventListener("click", () => reloadTree());
+      $("btn-maint-assets-add-root")?.addEventListener("click", async () => {
+        await openAssetModal("create", null, null);
+      });
+      $("maintenance-assets-tree")?.addEventListener("click", async (ev) => {
+        const actionNode = ev.target.closest("[data-action]");
+        if (!actionNode) return;
+        const action = String(actionNode.dataset.action || "");
+        const id = clampInt(actionNode.dataset.id, 0);
+        const parentId = clampInt(actionNode.dataset.parentId, 0);
+        const instrumentId = clampInt(actionNode.dataset.instrumentId, 0);
 
-      $("btn-dpclass-refresh")?.addEventListener("click", () => refreshKind("class"));
-      $("btn-dpunit-refresh")?.addEventListener("click", () => refreshKind("unit"));
-      $("btn-dpgroup-refresh")?.addEventListener("click", () => refreshKind("group"));
-
-      $("btn-dpclass-new")?.addEventListener("click", () => openMetaModal("class", null));
-      $("btn-dpunit-new")?.addEventListener("click", () => openMetaModal("unit", null));
-      $("btn-dpgroup-new")?.addEventListener("click", () => openMetaModal("group", null));
-
-      const form = $("form-meta-option");
-      form?.addEventListener("submit", async (ev) => {
-        ev.preventDefault();
-        await submitMetaForm();
+        if (action === "add-child") {
+          await openAssetModal("create", null, parentId || null);
+          return;
+        }
+        if (action === "edit" && id) {
+          const row = await api.get(`/maintenance/equipment/${id}`);
+          await openAssetModal("edit", row, null);
+          return;
+        }
+        if (action === "delete" && id) {
+          if (!confirmDanger("Delete this maintenance asset?")) return;
+          await api.delete(`/maintenance/equipment/${id}`);
+          toast("Maintenance asset deleted");
+          await reloadTree();
+          return;
+        }
+        if (action === "open-instrument" && instrumentId) {
+          await instrumentsView.openInstrumentDetail(instrumentId);
+        }
       });
 
-      // Delegate edit/delete actions
-      $("dpclass-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "class"));
-      $("dpunit-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "unit"));
-      $("dpgroup-table")?.addEventListener("click", (ev) => onMetaTableClick(ev, "group"));
+      $("form-maintenance-asset")?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitAssetForm();
+      });
+    }
+
+    function renderNode(node, instrumentsByEquipment, depth = 0) {
+      const id = clampInt(node?.id, 0);
+      const name = String(node?.name || "-");
+      const code = String(node?.equipment_code || "");
+      const assetType = String(node?.asset_type || "-");
+      const criticality = String(node?.criticality || "B");
+      const children = Array.isArray(node?.children) ? node.children : [];
+      const instruments = Array.isArray(instrumentsByEquipment.get(id)) ? instrumentsByEquipment.get(id) : [];
+
+      const wrapper = el("div", { style: `margin-left: ${depth * 16}px; padding: 6px 0;` }, [
+        el("div", { class: "row", style: "justify-content: space-between; gap: 8px;" }, [
+          el("div", { text: `${name} (${code || `#${id}`}) • ${assetType} • criticality ${criticality}` }, []),
+          el("div", { class: "actions" }, [
+            el("button", { class: "btn small", type: "button", dataset: { action: "add-child", parentId: String(id) }, text: "Add child" }, []),
+            el("button", { class: "btn small", type: "button", dataset: { action: "edit", id: String(id) }, text: "Edit" }, []),
+            el("button", { class: "btn small danger", type: "button", dataset: { action: "delete", id: String(id) }, text: "Delete" }, []),
+          ]),
+        ]),
+      ]);
+
+      for (const child of children) {
+        wrapper.appendChild(renderNode(child, instrumentsByEquipment, depth + 1));
+      }
+
+      for (const inst of instruments) {
+        const instId = clampInt(inst?.id, 0);
+        const instLabel = String(inst?.label || "-");
+        const instType = String(inst?.instrument_type || "-");
+        const instStatus = String(inst?.status || "-");
+        wrapper.appendChild(
+          el("div", { style: `margin-left: ${(depth + 1) * 16}px; padding: 4px 0;` }, [
+            el("div", {
+              class: "muted",
+              style: "cursor: pointer;",
+              dataset: { action: "open-instrument", instrumentId: String(instId) },
+              text: `Instrument: ${instLabel} • ${instType} • ${instStatus}`,
+            }, []),
+          ])
+        );
+      }
+      return wrapper;
+    }
+
+    function renderTree(tree) {
+      const host = $("maintenance-assets-tree");
+      if (!host) return;
+      host.innerHTML = "";
+      const rows = Array.isArray(tree) ? tree : [];
+      const instrumentsByEquipment = new Map();
+      for (const inst of instrumentRows) {
+        const equipmentId = clampInt(inst?.equipment_id, 0);
+        if (!equipmentId) continue;
+        if (!instrumentsByEquipment.has(equipmentId)) instrumentsByEquipment.set(equipmentId, []);
+        instrumentsByEquipment.get(equipmentId).push(inst);
+      }
+      for (const key of instrumentsByEquipment.keys()) {
+        const sorted = (instrumentsByEquipment.get(key) || []).slice().sort((a, b) => {
+          return String(a?.label || "").localeCompare(String(b?.label || ""));
+        });
+        instrumentsByEquipment.set(key, sorted);
+      }
+
+      if (!rows.length) {
+        host.appendChild(el("div", { class: "muted", text: "No maintenance assets found." }, []));
+        return;
+      }
+      for (const node of rows) {
+        host.appendChild(renderNode(node, instrumentsByEquipment));
+      }
+    }
+
+    async function loadFlatAssets() {
+      const rows = await api.get("/maintenance/equipment");
+      assetRows = Array.isArray(rows) ? rows : [];
+    }
+
+    async function loadInstruments() {
+      try {
+        const rows = await api.get("/maintenance/instruments");
+        instrumentRows = Array.isArray(rows) ? rows : [];
+      } catch {
+        instrumentRows = [];
+      }
+    }
+
+    async function reloadTree() {
+      setStatus("maintenance-assets-status", "Loading...", "");
+      try {
+        await Promise.all([loadFlatAssets(), loadInstruments()]);
+        const tree = await api.get("/maintenance/equipment/tree");
+        renderTree(tree);
+        setStatus("maintenance-assets-status", `Loaded ${assetRows.length} asset(s), ${instrumentRows.length} instrument(s)`, "ok");
+      } catch (err) {
+        setStatus("maintenance-assets-status", err?.message || "Failed to load maintenance assets", "error");
+      }
+    }
+
+    async function populateParentOptions(selectedParentId = null, currentAssetId = null) {
+      const sel = $("maintenance-asset-parent");
+      if (!sel) return;
+      const current = selectedParentId == null ? "" : String(selectedParentId);
+
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: "(No Parent)" }, []));
+      for (const row of assetRows) {
+        const id = clampInt(row?.id, 0);
+        if (!id) continue;
+        if (currentAssetId && id === clampInt(currentAssetId, 0)) continue;
+        const label = `${String(row?.name || `#${id}`)} (${String(row?.equipment_code || `#${id}`)})`;
+        sel.appendChild(el("option", { value: String(id), text: label }, []));
+      }
+      sel.value = Array.from(sel.options).some((o) => o.value === current) ? current : "";
+    }
+
+    async function openAssetModal(mode, row = null, forcedParentId = null) {
+      const form = $("form-maintenance-asset");
+      const title = $("maintenance-asset-modal-title");
+      if (!form) return;
+
+      editingAsset = row ? { ...row } : null;
+      form.reset();
+      setStatus("maintenance-asset-modal-status", "", "");
+      if (title) title.textContent = mode === "edit" ? "Edit Maintenance Asset" : "Add Maintenance Asset";
+
+      const currentAssetId = clampInt(row?.id, 0) || null;
+      const selectedParentId = forcedParentId ?? row?.parent_id ?? null;
+      await populateParentOptions(selectedParentId, currentAssetId);
+
+      form.asset_id.value = currentAssetId ? String(currentAssetId) : "";
+      form.name.value = String(row?.name || "");
+      form.location.value = String(row?.location || "");
+      form.description.value = String(row?.description || "");
+      form.vendor_id.value = row?.vendor_id != null ? String(row.vendor_id) : "";
+      form.asset_category.value = String(row?.asset_category || "");
+      form.asset_type.value = String(row?.asset_type || "");
+      form.criticality.value = String(row?.criticality || "B");
+      form.duty_cycle_hours_per_day.value = row?.duty_cycle_hours_per_day != null ? String(row.duty_cycle_hours_per_day) : "";
+      form.spares_class.value = String(row?.spares_class || "standard");
+
+      const selectedSafety = new Set(Array.isArray(row?.safety_classification) ? row.safety_classification : []);
+      const checks = form.querySelectorAll("input[name='safety_classification']");
+      checks.forEach((node) => {
+        node.checked = selectedSafety.has(String(node.value));
+      });
+
+      openDialog("modal-maintenance-asset");
+    }
+
+    async function submitAssetForm() {
+      const form = $("form-maintenance-asset");
+      if (!form) return;
+
+      const assetId = clampInt(form.asset_id?.value || 0, 0);
+      const safety = Array.from(form.querySelectorAll("input[name='safety_classification']:checked")).map((node) => String(node.value));
+
+      const payload = {
+        name: String(form.name?.value || "").trim(),
+        location: String(form.location?.value || "").trim() || null,
+        description: String(form.description?.value || "").trim() || null,
+        vendor_id: form.vendor_id?.value ? clampInt(form.vendor_id.value, 0) : null,
+        parent_id: form.parent_id?.value ? clampInt(form.parent_id.value, 0) : null,
+        asset_category: String(form.asset_category?.value || "").trim() || null,
+        asset_type: String(form.asset_type?.value || "").trim() || null,
+        criticality: String(form.criticality?.value || "B").trim() || "B",
+        duty_cycle_hours_per_day: String(form.duty_cycle_hours_per_day?.value || "").trim() === "" ? null : Number(form.duty_cycle_hours_per_day.value),
+        spares_class: String(form.spares_class?.value || "standard").trim() || "standard",
+        safety_classification: safety,
+        meta: editingAsset?.meta && typeof editingAsset.meta === "object" ? editingAsset.meta : {},
+      };
+
+      if (!payload.name) {
+        setStatus("maintenance-asset-modal-status", "Name is required", "error");
+        return;
+      }
+
+      setStatus("maintenance-asset-modal-status", "Saving...", "");
+      try {
+        if (assetId) {
+          await api.put(`/maintenance/equipment/${assetId}`, { json: payload });
+        } else {
+          await api.post("/maintenance/equipment", { json: payload });
+        }
+        closeDialog("modal-maintenance-asset");
+        toast("Maintenance asset saved");
+        await reloadTree();
+      } catch (err) {
+        setStatus("maintenance-asset-modal-status", err?.message || "Failed to save maintenance asset", "error");
+      }
     }
 
     async function show() {
@@ -4375,34 +4898,139 @@
         bind();
         initialized = true;
       }
+      await reloadTree();
+    }
+
+    return { show };
+  })();
+
+  // -----------------------------
+  // Meta view
+  // -----------------------------
+  const metaView = (() => {
+    let initialized = false;
+
+    function bind() {
+      $("btn-meta-refresh")?.addEventListener("click", () => refresh(true));
+
+      const domainSel = $("meta-domain");
+      domainSel?.addEventListener("change", async () => {
+        const next = String(domainSel.value || "datapoint");
+        state.meta.currentDomain = META_DEFINITIONS[next] ? next : "datapoint";
+        await refresh(false);
+      });
+
+      const form = $("form-meta-option");
+      form?.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        await submitMetaForm();
+      });
+
+      $("meta-sections")?.addEventListener("click", async (ev) => {
+        await onMetaSectionsClick(ev);
+      });
+    }
+
+    async function show() {
+      if (!initialized) {
+        bind();
+        initialized = true;
+      }
+
+      if (!META_DEFINITIONS[state.meta.currentDomain]) {
+        state.meta.currentDomain = "datapoint";
+      }
+
+      const domainSel = $("meta-domain");
+      if (domainSel) domainSel.value = state.meta.currentDomain;
       await refresh(false);
     }
 
     async function refresh(force) {
+      const domain = state.meta.currentDomain || "datapoint";
       try {
-        await ensureMetaLoaded(force);
-        render();
-        setStatus("dpclass-status", "");
-        setStatus("dpunit-status", "");
-        setStatus("dpgroup-status", "");
+        await ensureMetaDomainLoaded(domain, force);
+        render(domain);
+        setStatus("meta-status", "");
       } catch (err) {
-        toast(err?.message || "Failed to load meta lists", "error");
+        setStatus("meta-status", err?.message || "Failed to load meta lists", "error");
       }
     }
 
-    async function refreshKind(kind) {
-      // We currently load all 3 lists together to keep the UI consistent.
-      await refresh(true);
+    function render(domain) {
+      const root = $("meta-sections");
+      if (!root) return;
+      root.innerHTML = "";
+
+      const domainDef = getMetaDomain(domain);
+      const hint = $("meta-domain-hint");
+      if (hint) hint.textContent = domainDef?.hint || "";
+
+      const kindEntries = Object.entries(domainDef?.kinds || {});
+      if (!kindEntries.length) {
+        root.appendChild(
+          el("div", { class: "panel" }, [
+            el("h3", { text: `${domainDef?.label || "Meta"} metadata` }),
+            el("div", { class: "muted", text: "No metadata kinds are configured for this domain yet." }),
+          ])
+        );
+        return;
+      }
+
+      const wrapperClass = kindEntries.length > 1 ? "split" : "";
+      const wrapper = el("div", { class: wrapperClass }, []);
+      for (const [kind, kindDef] of kindEntries) {
+        wrapper.appendChild(renderMetaKindPanel(domain, kind, kindDef));
+      }
+      root.appendChild(wrapper);
     }
 
-    function render() {
-      renderMetaTable("dpclass-table", state.meta.classes, "class");
-      renderMetaTable("dpunit-table", state.meta.units, "unit");
-      renderMetaTable("dpgroup-table", state.meta.groups, "group");
+    function renderMetaKindPanel(domain, kind, kindDef) {
+      const statusId = `meta-status-${domain}-${kind}`;
+      const tableId = `meta-table-${domain}-${kind}`;
+      const items = getMetaItems(domain, kind);
+
+      const panel = el("div", { class: "panel", style: "margin-top: 16px" }, [
+        el("div", { class: "row" }, [
+          el("h3", { text: `${kindDef?.label || kind}s` }),
+          el("div", { class: "actions" }, [
+            el("button", {
+              class: "btn primary",
+              type: "button",
+              text: "New",
+              dataset: { action: "new", domain, kind },
+            }),
+            el("button", {
+              class: "btn",
+              type: "button",
+              text: "Refresh",
+              dataset: { action: "refresh-kind", domain, kind },
+            }),
+          ]),
+        ]),
+        el("div", { id: statusId, class: "status" }),
+      ]);
+
+      const tableWrap = el("div", { class: "table-wrap" }, []);
+      const table = el("table", { class: "table", id: tableId }, [
+        el("thead", {}, [
+          el("tr", {}, [
+            el("th", { style: "width: 70px", text: "ID" }),
+            el("th", { text: "Name" }),
+            el("th", { text: "Description" }),
+            el("th", { style: "width: 220px", text: "Actions" }),
+          ]),
+        ]),
+        el("tbody"),
+      ]);
+      tableWrap.appendChild(table);
+      panel.appendChild(tableWrap);
+
+      renderMetaTable(table, items, domain, kind);
+      return panel;
     }
 
-    function renderMetaTable(tableId, items, kind) {
-      const table = $(tableId);
+    function renderMetaTable(table, items, domain, kind) {
       const tbody = table?.querySelector("tbody");
       if (!tbody) return;
       tbody.innerHTML = "";
@@ -4413,73 +5041,89 @@
           el("td", { text: item.name ?? "" }),
           el("td", { text: item.description ?? "" }),
           el("td", {}, [
-            el(
-              "button",
-              {
-                class: "btn",
-                dataset: { action: "edit", kind, id: String(item.id) },
-                type: "button",
-                text: "Edit",
-              },
-              []
-            ),
+            el("button", {
+              class: "btn",
+              dataset: { action: "edit", domain, kind, id: String(item.id) },
+              type: "button",
+              text: "Edit",
+            }),
             " ",
-            el(
-              "button",
-              {
-                class: "btn danger",
-                dataset: { action: "delete", kind, id: String(item.id) },
-                type: "button",
-                text: "Delete",
-              },
-              []
-            ),
+            el("button", {
+              class: "btn danger",
+              dataset: { action: "delete", domain, kind, id: String(item.id) },
+              type: "button",
+              text: "Delete",
+            }),
           ]),
         ]);
         tbody.appendChild(tr);
       }
 
       if (!items || items.length === 0) {
-        tbody.appendChild(
-          el("tr", {}, [
-            el(
-              "td",
-              { class: "muted", colspan: "4", text: "No items" },
-              []
-            ),
-          ])
-        );
+        tbody.appendChild(el("tr", {}, [el("td", { class: "muted", colspan: "4", text: "No items" }, [])]));
       }
     }
 
-    function onMetaTableClick(ev, kind) {
+    async function onMetaSectionsClick(ev) {
       const btn = ev.target.closest("button[data-action]");
       if (!btn) return;
-      const action = btn.dataset.action;
-      const id = clampInt(btn.dataset.id, 0);
-      if (!id) return;
 
-      const list = kind === "class" ? state.meta.classes : kind === "unit" ? state.meta.units : state.meta.groups;
+      const action = String(btn.dataset.action || "");
+      const domain = META_DEFINITIONS[btn.dataset.domain] ? String(btn.dataset.domain) : (state.meta.currentDomain || "datapoint");
+      const kind = String(btn.dataset.kind || "").trim();
+
+      if (action === "new") {
+        openMetaModal(domain, kind, null);
+        return;
+      }
+      if (action === "refresh-kind") {
+        await refreshKind(domain, kind);
+        return;
+      }
+
+      const id = clampInt(btn.dataset.id, 0);
+      if (!id || !kind) return;
+      const list = getMetaItems(domain, kind);
       const existing = (list || []).find((x) => Number(x.id) === id) || null;
-      if (action === "edit") return openMetaModal(kind, existing);
-      if (action === "delete") return deleteMeta(kind, existing);
+
+      if (action === "edit") {
+        openMetaModal(domain, kind, existing);
+        return;
+      }
+      if (action === "delete") {
+        await deleteMeta(domain, kind, existing);
+      }
     }
 
-    function openMetaModal(kind, existing) {
+    async function refreshKind(domain, kind) {
+      const status = $(`meta-status-${domain}-${kind}`);
+      const kindDef = getMetaKindDef(domain, kind);
+      if (!kindDef?.endpoint) {
+        setStatus(status, "No endpoint configured for this metadata kind.");
+        return;
+      }
+      setStatus(status, "Refreshing…");
+      await refresh(true);
+      setStatus(status, "", "ok");
+    }
+
+    function openMetaModal(domain, kind, existing) {
       const dlg = $("modal-meta-option");
       const form = $("form-meta-option");
       if (!dlg || !form) return;
       setStatus("modal-meta-status", "");
 
       form.reset();
+      form.elements.domain.value = domain;
       form.elements.kind.value = kind;
       form.elements.id.value = existing?.id ? String(existing.id) : "";
       form.elements.name.value = existing?.name || "";
       form.elements.description.value = existing?.description || "";
 
       const title = $("modal-meta-title");
-      const label = META_KIND[kind]?.label || "Option";
-      if (title) title.textContent = existing ? `Edit ${label}` : `New ${label}`;
+      const domainLabel = getMetaDomain(domain)?.label || "Meta";
+      const kindLabel = getMetaKindDef(domain, kind)?.label || "Option";
+      if (title) title.textContent = existing ? `Edit ${domainLabel} ${kindLabel}` : `New ${domainLabel} ${kindLabel}`;
 
       openDialog(dlg);
     }
@@ -4491,14 +5135,15 @@
       setStatus(status, "Saving…");
 
       const fd = new FormData(form);
+      const domain = String(fd.get("domain") || "datapoint").trim();
       const kind = String(fd.get("kind") || "").trim();
       const id = clampInt(fd.get("id"), 0);
       const name = String(fd.get("name") || "").trim();
       const description = String(fd.get("description") || "").trim();
 
-      const endpoint = META_KIND[kind]?.endpoint;
+      const endpoint = getMetaKindDef(domain, kind)?.endpoint;
       if (!endpoint) {
-        setStatus(status, "Unknown meta option type", "error");
+        setStatus(status, "This metadata kind is not configured yet.", "error");
         return;
       }
 
@@ -4516,12 +5161,13 @@
       }
     }
 
-    async function deleteMeta(kind, existing) {
+    async function deleteMeta(domain, kind, existing) {
       if (!existing?.id) return;
-      const label = META_KIND[kind]?.label || "Item";
-      if (!confirmDanger(`Delete ${label} '${existing.name}'?`)) return;
+      const domainLabel = getMetaDomain(domain)?.label || "Meta";
+      const kindLabel = getMetaKindDef(domain, kind)?.label || "Item";
+      if (!confirmDanger(`Delete ${domainLabel} ${kindLabel} '${existing.name}'?`)) return;
 
-      const endpoint = META_KIND[kind]?.endpoint;
+      const endpoint = getMetaKindDef(domain, kind)?.endpoint;
       if (!endpoint) return;
       try {
         await api.delete(`${endpoint}/${existing.id}`);

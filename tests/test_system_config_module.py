@@ -110,3 +110,146 @@ def test_plc_container_equipment_datapoint_crud(client, admin_token):
     # PLC should be gone
     r = client.get(f"/api/config/plcs/{plc_id}", headers=h)
     assert r.status_code == 404
+
+
+def test_meta_container_type_and_group_hierarchy_inheritance(client, admin_token):
+    h = _auth_headers(admin_token)
+
+    # Shared group used across hierarchy
+    r = client.post(
+        "/api/config/datapoint-groups",
+        headers=h,
+        json={"name": "HIER-GROUP", "description": "shared"},
+    )
+    assert r.status_code == 200, r.text
+    gid = r.json()["id"]
+
+    # Container type meta CRUD
+    r = client.post(
+        "/api/config/container-types",
+        headers=h,
+        json={"name": "COND", "description": "Condenser"},
+    )
+    assert r.status_code == 200, r.text
+    container_type_id = r.json()["id"]
+
+    r = client.patch(
+        f"/api/config/container-types/{container_type_id}",
+        headers=h,
+        json={"name": "COND-UPDATED"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "COND-UPDATED"
+
+    # PLC gets group directly
+    r = client.post(
+        "/api/config/plcs",
+        headers=h,
+        json={"name": "hier-plc", "ip": "192.168.1.11", "port": 502, "groupId": gid},
+    )
+    assert r.status_code == 200, r.text
+    plc = r.json()
+    plc_id = plc["id"]
+    assert plc["groupId"] == gid
+
+    # Container inherits PLC group when omitted
+    r = client.post(
+        f"/api/config/plcs/{plc_id}/containers",
+        headers=h,
+        json={"name": "COND-01", "type": "COND-UPDATED"},
+    )
+    assert r.status_code == 200, r.text
+    container = r.json()
+    container_id = container["id"]
+    assert container["groupId"] == gid
+
+    # Equipment inherits Container group when omitted
+    r = client.post(
+        f"/api/config/containers/{container_id}/equipment",
+        headers=h,
+        json={"name": "EQ-01", "type": "EVAP"},
+    )
+    assert r.status_code == 200, r.text
+    equipment = r.json()
+    equipment_id = equipment["id"]
+    assert equipment["groupId"] == gid
+
+    # PLC datapoint inherits PLC group when omitted
+    r = client.post(
+        f"/api/config/plcs/{plc_id}/data-points",
+        headers=h,
+        json={
+            "label": "PLC_DP",
+            "description": "plc-level dp",
+            "category": "read",
+            "type": "INTEGER",
+            "address": "DB1.DBW0",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["groupId"] == gid
+
+    # Equipment datapoint inherits Equipment->Container->PLC group chain when omitted
+    r = client.post(
+        f"/api/config/equipment/{equipment_id}/data-points",
+        headers=h,
+        json={
+            "label": "EQ_DP",
+            "description": "equipment-level dp",
+            "category": "read",
+            "type": "INTEGER",
+            "address": "DB2.DBW0",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["groupId"] == gid
+
+    # Shared group cannot be deleted while used by hierarchy resources/datapoints
+    r = client.delete(f"/api/config/datapoint-groups/{gid}", headers=h)
+    assert r.status_code == 400, r.text
+
+
+def test_meta_equipment_type_crud(client, admin_token):
+    h = _auth_headers(admin_token)
+
+    r = client.post(
+        "/api/config/equipment-types",
+        headers=h,
+        json={"name": "EVAP", "description": "Evaporator"},
+    )
+    assert r.status_code == 200, r.text
+    equipment_type_id = r.json()["id"]
+
+    r = client.patch(
+        f"/api/config/equipment-types/{equipment_type_id}",
+        headers=h,
+        json={"name": "EVAP-UPDATED"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "EVAP-UPDATED"
+
+    r = client.post(
+        "/api/config/plcs",
+        headers=h,
+        json={"name": "eqtype-plc", "ip": "192.168.1.12", "port": 502},
+    )
+    assert r.status_code == 200, r.text
+    plc_id = r.json()["id"]
+
+    r = client.post(
+        f"/api/config/plcs/{plc_id}/containers",
+        headers=h,
+        json={"name": "C-01", "type": "COND"},
+    )
+    assert r.status_code == 200, r.text
+    container_id = r.json()["id"]
+
+    r = client.post(
+        f"/api/config/containers/{container_id}/equipment",
+        headers=h,
+        json={"name": "E-01", "type": "EVAP-UPDATED"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.delete(f"/api/config/equipment-types/{equipment_type_id}", headers=h)
+    assert r.status_code == 400, r.text

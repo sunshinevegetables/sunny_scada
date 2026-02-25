@@ -431,10 +431,18 @@ class Equipment(Base):
     location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vendor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"), nullable=True, index=True)
+    asset_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    asset_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    criticality: Mapped[str] = mapped_column(String(10), default="B", index=True)
+    duty_cycle_hours_per_day: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spares_class: Mapped[str] = mapped_column(String(30), default="standard", index=True)
+    safety_classification: Mapped[List[str]] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
 
     vendor: Mapped[Optional[Vendor]] = relationship("Vendor", lazy="selectin")
+    parent: Mapped[Optional["Equipment"]] = relationship("Equipment", remote_side=[id], lazy="selectin")
 
 
 class Instrument(Base):
@@ -753,6 +761,10 @@ class CfgPLC(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     ip: Mapped[str] = mapped_column(String(255), index=True)
     port: Mapped[int] = mapped_column(Integer)
+    # Optional datapoint group that can be inherited by container/equipment/datapoints
+    group_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cfg_data_point_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -765,6 +777,7 @@ class CfgPLC(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    plc_group: Mapped[Optional["CfgDataPointGroup"]] = relationship("CfgDataPointGroup", lazy="selectin")
 
 
 class CfgContainer(Base):
@@ -825,6 +838,32 @@ class CfgEquipment(Base):
     __table_args__ = (
         UniqueConstraint("container_id", "name", name="uq_cfg_equipment_container_name"),
     )
+
+
+class CfgContainerType(Base):
+    __tablename__ = "cfg_container_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class CfgEquipmentType(Base):
+    __tablename__ = "cfg_equipment_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class CfgDataPointClass(Base):

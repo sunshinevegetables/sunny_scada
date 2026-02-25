@@ -22,6 +22,8 @@ from sunny_scada.db.models import (
     CfgPLC,
     CfgContainer,
     CfgEquipment,
+    CfgContainerType,
+    CfgEquipmentType,
     CfgDataPoint,
     CfgDataPointClass,
     CfgDataPointUnit,
@@ -54,6 +56,7 @@ class PLCIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     ip: str = Field(min_length=1, max_length=255)
     port: int = Field(ge=1, le=65535)
+    groupId: Optional[int] = None
 
     @field_validator("ip")
     @classmethod
@@ -65,6 +68,7 @@ class PLCPatch(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     ip: Optional[str] = Field(default=None, min_length=1, max_length=255)
     port: Optional[int] = Field(default=None, ge=1, le=65535)
+    groupId: Optional[int] = None
 
     @field_validator("ip")
     @classmethod
@@ -79,6 +83,7 @@ class PLCOut(BaseModel):
     name: str
     ip: str
     port: int
+    groupId: Optional[int] = None
 
 
 class ContainerIn(BaseModel):
@@ -245,6 +250,7 @@ def get_config_tree(
             "name": p.name,
             "ip": p.ip,
             "port": p.port,
+            "groupId": p.group_id,
             "containers": [],
             "datapoints": [],
         }
@@ -561,6 +567,230 @@ def list_datapoint_groups(
     return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
 
 
+@router.get("/container-types", response_model=list[MetaOptionOut])
+def list_container_types(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("config:read")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    items = svc.list_container_types(db)
+    return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
+
+
+@router.post("/container-types", response_model=MetaOptionOut)
+def create_container_type(
+    req: MetaOptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    try:
+        obj = svc.create_container_type(db, name=req.name, description=req.description, user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.container_type.create",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "name": obj.name},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.patch("/container-types/{type_id}", response_model=MetaOptionOut)
+def patch_container_type(
+    type_id: int,
+    req: MetaOptionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_container_type(db, type_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Container type not found")
+    try:
+        obj = svc.update_container_type(db, obj, patch=req.model_dump(exclude_unset=True), user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.container_type.update",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "patch": req.model_dump(exclude_unset=True)},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.delete("/container-types/{type_id}")
+def delete_container_type(
+    type_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_container_type(db, type_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Container type not found")
+    name = obj.name
+    try:
+        svc.delete_container_type(db, obj)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.container_type.delete",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=name,
+            metadata={"id": type_id, "name": name},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+@router.get("/equipment-types", response_model=list[MetaOptionOut])
+def list_equipment_types(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("config:read")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    items = svc.list_equipment_types(db)
+    return [MetaOptionOut(id=i.id, name=i.name, description=i.description) for i in items]
+
+
+@router.post("/equipment-types", response_model=MetaOptionOut)
+def create_equipment_type(
+    req: MetaOptionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    try:
+        obj = svc.create_equipment_type(db, name=req.name, description=req.description, user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.equipment_type.create",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "name": obj.name},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.patch("/equipment-types/{type_id}", response_model=MetaOptionOut)
+def patch_equipment_type(
+    type_id: int,
+    req: MetaOptionPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_equipment_type(db, type_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Equipment type not found")
+    try:
+        obj = svc.update_equipment_type(db, obj, patch=req.model_dump(exclude_unset=True), user_id=me.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.equipment_type.update",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=obj.name,
+            metadata={"id": obj.id, "patch": req.model_dump(exclude_unset=True)},
+        )
+    except Exception:
+        pass
+
+    return MetaOptionOut(id=obj.id, name=obj.name, description=obj.description)
+
+
+@router.delete("/equipment-types/{type_id}")
+def delete_equipment_type(
+    type_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    audit: AuditService = Depends(get_audit_service),
+    me=Depends(get_current_user),
+    _perm=Depends(require_permission("config:write")),
+    settings: Settings = Depends(get_settings),
+):
+    svc = _svc(settings)
+    obj = svc.get_equipment_type(db, type_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Equipment type not found")
+    name = obj.name
+    try:
+        svc.delete_equipment_type(db, obj)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        audit.log(
+            db,
+            action="system_config.equipment_type.delete",
+            user_id=me.id,
+            client_ip=_client_ip(request),
+            resource=name,
+            metadata={"id": type_id, "name": name},
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
 @router.post("/datapoint-groups", response_model=MetaOptionOut)
 def create_datapoint_group(
     req: MetaOptionIn,
@@ -681,7 +911,7 @@ def list_plcs(
     if not _is_acl_admin(db, auth, me):
         ea = ac.effective_access(db, me)
         plcs = [p for p in plcs if p.id in ea.read_plc_ids]
-    return [PLCOut(id=p.id, name=p.name, ip=p.ip, port=p.port) for p in plcs]
+    return [PLCOut(id=p.id, name=p.name, ip=p.ip, port=p.port, groupId=p.group_id) for p in plcs]
 
 
 @router.post("/plcs", response_model=PLCOut)
@@ -696,7 +926,7 @@ def create_plc(
 ):
     svc = _svc(settings)
     try:
-        plc = svc.create_plc(db, name=req.name, ip=req.ip, port=req.port, user_id=me.id)
+        plc = svc.create_plc(db, name=req.name, ip=req.ip, port=req.port, group_id=req.groupId, user_id=me.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -711,7 +941,7 @@ def create_plc(
         )
     except Exception:
         pass
-    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port)
+    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port, groupId=plc.group_id)
 
 
 @router.get("/plcs/{plc_id}", response_model=PLCOut)
@@ -726,7 +956,7 @@ def get_plc(
     plc = svc.get_plc(db, plc_id)
     if not plc:
         raise HTTPException(status_code=404, detail="PLC not found")
-    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port)
+    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port, groupId=plc.group_id)
 
 
 @router.patch("/plcs/{plc_id}", response_model=PLCOut)
@@ -762,7 +992,7 @@ def patch_plc(
     except Exception:
         pass
 
-    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port)
+    return PLCOut(id=plc.id, name=plc.name, ip=plc.ip, port=plc.port, groupId=plc.group_id)
 
 
 @router.delete("/plcs/{plc_id}")
@@ -825,7 +1055,7 @@ def list_containers(
     if not _is_acl_admin(db, auth, me):
         ea = ac.effective_access(db, me)
         items = [c for c in items if c.id in ea.read_container_ids]
-    return [ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type) for c in items]
+    return [ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type, groupId=c.group_id) for c in items]
 
 
 @router.post("/plcs/{plc_id}/containers", response_model=ContainerOut)
@@ -874,7 +1104,7 @@ def get_container(
     c = svc.get_container(db, container_id)
     if not c:
         raise HTTPException(status_code=404, detail="Container not found")
-    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type)
+    return ContainerOut(id=c.id, plc_id=c.plc_id, name=c.name, type=c.type, groupId=c.group_id)
 
 
 @router.patch("/containers/{container_id}", response_model=ContainerOut)
@@ -969,7 +1199,7 @@ def list_equipment(
     if not _is_acl_admin(db, auth, me):
         ea = ac.effective_access(db, me)
         items = [e for e in items if e.id in ea.read_equipment_ids]
-    return [EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type) for e in items]
+    return [EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type, groupId=e.group_id) for e in items]
 
 
 @router.post("/containers/{container_id}/equipment", response_model=EquipmentOut)
@@ -1018,7 +1248,7 @@ def get_equipment(
     e = svc.get_equipment(db, equipment_id)
     if not e:
         raise HTTPException(status_code=404, detail="Equipment not found")
-    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type)
+    return EquipmentOut(id=e.id, container_id=e.container_id, name=e.name, type=e.type, groupId=e.group_id)
 
 
 @router.patch("/equipment/{equipment_id}", response_model=EquipmentOut)

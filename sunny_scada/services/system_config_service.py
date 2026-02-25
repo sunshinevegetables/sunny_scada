@@ -11,6 +11,8 @@ from sunny_scada.db.models import (
     CfgPLC,
     CfgContainer,
     CfgEquipment,
+    CfgContainerType,
+    CfgEquipmentType,
     CfgDataPoint,
     CfgDataPointBit,
     CfgDataPointClass,
@@ -180,16 +182,35 @@ class SystemConfigService:
     def get_plc(self, db: Session, plc_id: int) -> Optional[CfgPLC]:
         return db.query(CfgPLC).filter(CfgPLC.id == plc_id).one_or_none()
 
-    def create_plc(self, db: Session, *, name: str, ip: str, port: int, user_id: Optional[int]) -> CfgPLC:
+    def create_plc(
+        self,
+        db: Session,
+        *,
+        name: str,
+        ip: str,
+        port: int,
+        group_id: Optional[int] = None,
+        user_id: Optional[int],
+    ) -> CfgPLC:
         name = validate_name(name)
         ip = validate_ip_or_hostname(ip)
         if port < 1 or port > 65535:
             raise ValueError("port must be between 1 and 65535")
 
+        if group_id is not None and not self.get_datapoint_group(db, int(group_id)):
+            raise ValueError("group not found")
+
         if db.query(CfgPLC).filter(CfgPLC.name == name).first():
             raise ValueError("PLC name already exists")
 
-        plc = CfgPLC(name=name, ip=ip, port=port, created_by_user_id=user_id, updated_by_user_id=user_id)
+        plc = CfgPLC(
+            name=name,
+            ip=ip,
+            port=port,
+            group_id=(int(group_id) if group_id is not None else None),
+            created_by_user_id=user_id,
+            updated_by_user_id=user_id,
+        )
         db.add(plc)
         db.commit()
         db.refresh(plc)
@@ -208,6 +229,14 @@ class SystemConfigService:
             if port < 1 or port > 65535:
                 raise ValueError("port must be between 1 and 65535")
             plc.port = port
+        if "groupId" in patch:
+            gid = patch.get("groupId")
+            if gid is None:
+                plc.group_id = None
+            else:
+                if not self.get_datapoint_group(db, int(gid)):
+                    raise ValueError("group not found")
+                plc.group_id = int(gid)
 
         plc.updated_by_user_id = user_id
         db.add(plc)
@@ -250,6 +279,8 @@ class SystemConfigService:
         type_ = validate_name(type_, field="type")
         if db.query(CfgContainer).filter(CfgContainer.plc_id == plc.id, CfgContainer.name == name).first():
             raise ValueError("Container name already exists in PLC")
+        if group_id is None and getattr(plc, "group_id", None) is not None:
+            group_id = int(plc.group_id)
         if group_id is not None and not self.get_datapoint_group(db, int(group_id)):
             raise ValueError("group not found")
 
@@ -314,6 +345,12 @@ class SystemConfigService:
         type_ = validate_name(type_, field="type")
         if db.query(CfgEquipment).filter(CfgEquipment.container_id == container.id, CfgEquipment.name == name).first():
             raise ValueError("Equipment name already exists in container")
+        if group_id is None and getattr(container, "group_id", None) is not None:
+            group_id = int(container.group_id)
+        if group_id is None:
+            parent_plc = self.get_plc(db, int(container.plc_id))
+            if parent_plc is not None and getattr(parent_plc, "group_id", None) is not None:
+                group_id = int(parent_plc.group_id)
         if group_id is not None and not self.get_datapoint_group(db, int(group_id)):
             raise ValueError("group not found")
 
@@ -503,8 +540,129 @@ class SystemConfigService:
 
     def delete_datapoint_group(self, db: Session, obj: CfgDataPointGroup) -> None:
         in_use = db.query(CfgDataPoint.id).filter(CfgDataPoint.group_id == obj.id).first()
+        if not in_use:
+            in_use = db.query(CfgEquipment.id).filter(CfgEquipment.group_id == obj.id).first()
+        if not in_use:
+            in_use = db.query(CfgContainer.id).filter(CfgContainer.group_id == obj.id).first()
+        if not in_use:
+            in_use = db.query(CfgPLC.id).filter(CfgPLC.group_id == obj.id).first()
         if in_use:
-            raise ValueError("group is in use by datapoints")
+            raise ValueError("group is in use by configuration resources")
+        db.delete(obj)
+        db.commit()
+
+    # ---------------- Container Type Meta ----------------
+
+    def list_container_types(self, db: Session) -> list[CfgContainerType]:
+        return db.query(CfgContainerType).order_by(CfgContainerType.id.asc()).all()
+
+    def get_container_type(self, db: Session, type_id: int) -> Optional[CfgContainerType]:
+        return db.query(CfgContainerType).filter(CfgContainerType.id == type_id).one_or_none()
+
+    def create_container_type(
+        self, db: Session, *, name: str, description: Optional[str], user_id: Optional[int]
+    ) -> CfgContainerType:
+        name = validate_meta_option_name(name, field="name")
+        if db.query(CfgContainerType).filter(CfgContainerType.name == name).first():
+            raise ValueError("container type name already exists")
+
+        obj = CfgContainerType(
+            name=name,
+            description=(description.strip() if description else None),
+            created_by_user_id=user_id,
+            updated_by_user_id=user_id,
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    def update_container_type(
+        self, db: Session, obj: CfgContainerType, *, patch: Dict[str, Any], user_id: Optional[int]
+    ) -> CfgContainerType:
+        old_name = obj.name
+        if "name" in patch and patch["name"] is not None:
+            name = validate_meta_option_name(str(patch["name"]), field="name")
+            if name != obj.name and db.query(CfgContainerType).filter(CfgContainerType.name == name).first():
+                raise ValueError("container type name already exists")
+            obj.name = name
+        if "description" in patch:
+            desc = patch.get("description")
+            obj.description = (str(desc).strip() if desc is not None else None)
+        obj.updated_by_user_id = user_id
+        db.add(obj)
+
+        # Keep existing containers consistent when type option is renamed.
+        if old_name != obj.name:
+            db.query(CfgContainer).filter(CfgContainer.type == old_name).update(
+                {CfgContainer.type: obj.name}, synchronize_session=False
+            )
+
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    def delete_container_type(self, db: Session, obj: CfgContainerType) -> None:
+        in_use = db.query(CfgContainer.id).filter(CfgContainer.type == obj.name).first()
+        if in_use:
+            raise ValueError("container type is in use by containers")
+        db.delete(obj)
+        db.commit()
+
+    # ---------------- Equipment Type Meta ----------------
+
+    def list_equipment_types(self, db: Session) -> list[CfgEquipmentType]:
+        return db.query(CfgEquipmentType).order_by(CfgEquipmentType.id.asc()).all()
+
+    def get_equipment_type(self, db: Session, type_id: int) -> Optional[CfgEquipmentType]:
+        return db.query(CfgEquipmentType).filter(CfgEquipmentType.id == type_id).one_or_none()
+
+    def create_equipment_type(
+        self, db: Session, *, name: str, description: Optional[str], user_id: Optional[int]
+    ) -> CfgEquipmentType:
+        name = validate_meta_option_name(name, field="name")
+        if db.query(CfgEquipmentType).filter(CfgEquipmentType.name == name).first():
+            raise ValueError("equipment type name already exists")
+
+        obj = CfgEquipmentType(
+            name=name,
+            description=(description.strip() if description else None),
+            created_by_user_id=user_id,
+            updated_by_user_id=user_id,
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    def update_equipment_type(
+        self, db: Session, obj: CfgEquipmentType, *, patch: Dict[str, Any], user_id: Optional[int]
+    ) -> CfgEquipmentType:
+        old_name = obj.name
+        if "name" in patch and patch["name"] is not None:
+            name = validate_meta_option_name(str(patch["name"]), field="name")
+            if name != obj.name and db.query(CfgEquipmentType).filter(CfgEquipmentType.name == name).first():
+                raise ValueError("equipment type name already exists")
+            obj.name = name
+        if "description" in patch:
+            desc = patch.get("description")
+            obj.description = (str(desc).strip() if desc is not None else None)
+        obj.updated_by_user_id = user_id
+        db.add(obj)
+
+        if old_name != obj.name:
+            db.query(CfgEquipment).filter(CfgEquipment.type == old_name).update(
+                {CfgEquipment.type: obj.name}, synchronize_session=False
+            )
+
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    def delete_equipment_type(self, db: Session, obj: CfgEquipmentType) -> None:
+        in_use = db.query(CfgEquipment.id).filter(CfgEquipment.type == obj.name).first()
+        if in_use:
+            raise ValueError("equipment type is in use by equipment")
         db.delete(obj)
         db.commit()
 
@@ -614,16 +772,32 @@ class SystemConfigService:
         if type_ == "DIGITAL" and (class_id is not None or unit_id is not None):
             raise ValueError("class/unit are only allowed for REAL or INTEGER datapoints")
 
-        # If group_id not provided, attempt to inherit from parent container/equipment
+        # If group_id not provided, inherit from owner hierarchy plc -> container -> equipment -> datapoint
         if group_id is None:
+            if owner_type == "plc":
+                parent = self.get_plc(db, int(owner_id))
+                if parent is not None and getattr(parent, "group_id", None) is not None:
+                    group_id = int(parent.group_id)
             if owner_type == "container":
                 parent = self.get_container(db, int(owner_id))
                 if parent is not None and getattr(parent, "group_id", None) is not None:
                     group_id = int(parent.group_id)
+                if group_id is None and parent is not None:
+                    plc = self.get_plc(db, int(parent.plc_id))
+                    if plc is not None and getattr(plc, "group_id", None) is not None:
+                        group_id = int(plc.group_id)
             elif owner_type == "equipment":
                 parent = self.get_equipment(db, int(owner_id))
                 if parent is not None and getattr(parent, "group_id", None) is not None:
                     group_id = int(parent.group_id)
+                if group_id is None and parent is not None:
+                    container = self.get_container(db, int(parent.container_id))
+                    if container is not None and getattr(container, "group_id", None) is not None:
+                        group_id = int(container.group_id)
+                    elif container is not None:
+                        plc = self.get_plc(db, int(container.plc_id))
+                        if plc is not None and getattr(plc, "group_id", None) is not None:
+                            group_id = int(plc.group_id)
 
         if group_id is not None and not self.get_datapoint_group(db, int(group_id)):
             raise ValueError("group not found")

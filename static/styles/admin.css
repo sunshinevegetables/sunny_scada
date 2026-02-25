@@ -319,6 +319,92 @@ input::placeholder {
   min-width: 320px;
 }
 
+.instrument-detail-modal {
+  width: min(1160px, calc(100vw - 40px));
+  max-width: 1160px;
+}
+
+.instrument-detail-body {
+  gap: 14px;
+  padding: 18px;
+}
+
+.instrument-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 2px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+
+.instrument-detail-tabs .btn.small {
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.instrument-detail-tabs .btn.small.primary {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  color: #dbeafe;
+}
+
+.instrument-detail-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(17, 24, 39, 0.55);
+}
+
+.instrument-detail-table-wrap {
+  border-radius: 10px;
+}
+
+.instrument-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.instrument-detail-scrollable-table {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.instrument-detail-scrollable-table .compact {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.instrument-detail-scrollable-table .compact th,
+.instrument-detail-scrollable-table .compact td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.instrument-detail-scrollable-table .compact th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.instrument-detail-status {
+  margin-top: 12px;
+}
+
 .toast {
   position: fixed;
   bottom: 18px;
@@ -517,5 +603,19 @@ input::placeholder {
   }
   .table {
     min-width: 600px;
+  }
+
+  .instrument-detail-tabs {
+    padding: 6px;
+  }
+
+  .instrument-detail-tabs .btn.small {
+    flex: 1 1 calc(50% - 8px);
+    text-align: center;
+  }
+
+  .instrument-detail-toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
 }
