@@ -3315,6 +3315,25 @@
       ].join("|");
     }
 
+    function hasPvMapping(instrument) {
+      const mappings = Array.isArray(instrument?.mapped_datapoints) ? instrument.mapped_datapoints : [];
+      return mappings.some((m) => {
+        const role = String(m?.role || "").trim().toLowerCase();
+        const cfgId = clampInt(m?.cfg_data_point_id, 0);
+        return role === "pv" && cfgId > 0;
+      });
+    }
+
+    function findInstrumentById(instrumentId) {
+      const id = clampInt(instrumentId, 0);
+      if (!id) return null;
+      return (
+        instrumentsCache.find((x) => clampInt(x?.id, 0) === id) ||
+        instrumentsCacheFiltered.find((x) => clampInt(x?.id, 0) === id) ||
+        null
+      );
+    }
+
     async function fetchInstrumentHealth(instrumentId, query, force = false) {
       const id = clampInt(instrumentId, 0);
       if (!id) return null;
@@ -3370,6 +3389,11 @@
     async function loadAndRenderInstrumentHealth(force = false) {
       const instrumentId = clampInt(currentInstrumentDetail?.id, 0);
       if (!instrumentId) return;
+      if (!hasPvMapping(currentInstrumentDetail)) {
+        renderHealthTabData({ flags: ["pv_not_mapped"], score_0_100: null, sample_count: 0, simple_stats: {} });
+        setStatus("instrument-detail-health-status", "PV datapoint mapping is required to calculate health.", "error");
+        return;
+      }
       const query = getHealthQueryFromControls();
 
       setStatus("instrument-detail-health-status", "Loading health...", "");
@@ -3385,12 +3409,16 @@
     function renderHealthCellContent(cell, instrumentId) {
       if (!cell) return;
       const id = clampInt(instrumentId, 0);
+      const instrument = findInstrumentById(id);
+      const mapped = hasPvMapping(instrument);
       const query = defaultHealthQuery();
       const key = healthCacheKey(id, query);
       const cached = instrumentHealthCache.get(key) || null;
 
       cell.innerHTML = "";
-      if (cached) {
+      if (!mapped) {
+        cell.appendChild(el("span", { class: "muted", text: "Not mapped" }, []));
+      } else if (cached) {
         const flags = Array.isArray(cached?.flags) ? cached.flags : [];
         cell.appendChild(renderHealthBadge(cached?.score_0_100, flags));
       } else if (instrumentHealthLoading.has(key)) {
@@ -3406,7 +3434,8 @@
           {
             class: "btn small",
             type: "button",
-            title: "Load Health",
+            title: mapped ? "Load Health" : "PV mapping required",
+            disabled: mapped ? undefined : true,
             dataset: { action: "load-health", id: String(id) },
             text: "⟳",
           },
@@ -3419,6 +3448,11 @@
       const id = clampInt(instrumentId, 0);
       if (!id) return;
       const cell = document.querySelector(`#instruments-table [data-health-cell='${id}']`);
+      const instrument = findInstrumentById(id);
+      if (!hasPvMapping(instrument)) {
+        renderHealthCellContent(cell, id);
+        return;
+      }
       const query = defaultHealthQuery();
       renderHealthCellContent(cell, id);
       try {
@@ -3451,6 +3485,7 @@
         const equipmentName = String(inst?.equipment?.name || "-");
         const type = String(inst?.instrument_type || "");
         const pvDatapoint = String(inst?.mapped_datapoints?.[0]?.label || "-");
+        const pvMapped = hasPvMapping(inst);
         const calibrationDueRaw = inst?.meta?.calibration_due;
         const calibrationDue = calibrationDueRaw ? new Date(calibrationDueRaw).toLocaleDateString() : "-";
         
@@ -3482,6 +3517,12 @@
           el("td", { text: equipmentName }),
           el("td", { text: type }),
           el("td", { text: pvDatapoint }),
+          el("td", {}, [
+            el("span", {
+              class: `badge ${pvMapped ? "ok" : "warn"}`,
+              text: pvMapped ? "PV mapped" : "PV missing",
+            }),
+          ]),
           healthCell,
           el("td", {}, calibrationBadgeClass ? [
             el("span", { class: `badge ${calibrationBadgeClass}`, text: calibrationDue })
@@ -4659,41 +4700,70 @@
 
   const maintenanceAssetsView = (() => {
     let initialized = false;
+    let containerRows = [];
     let assetRows = [];
     let instrumentRows = [];
     let editingAsset = null;
+    let selectedNodeKey = null;
+    const collapsed = new Set();
 
     function bind() {
       $("btn-maint-assets-refresh")?.addEventListener("click", () => reloadTree());
       $("btn-maint-assets-add-root")?.addEventListener("click", async () => {
         await openAssetModal("create", null, null);
       });
+      $("maintenance-assets-search")?.addEventListener("input", () => renderTree());
+      $("btn-maint-node-save")?.addEventListener("click", async () => {
+        await saveSelectedNode();
+      });
+      $("btn-maint-node-delete")?.addEventListener("click", async () => {
+        await deleteSelectedNode();
+      });
       $("maintenance-assets-tree")?.addEventListener("click", async (ev) => {
-        const actionNode = ev.target.closest("[data-action]");
+        const twisty = ev.target.closest("button[data-toggle]");
+        if (twisty) {
+          ev.stopPropagation();
+          const key = String(twisty.dataset.toggle || "");
+          if (!key) return;
+          if (collapsed.has(key)) collapsed.delete(key);
+          else collapsed.add(key);
+          renderTree();
+          return;
+        }
+
+        const nodeEl = ev.target.closest("[data-node-key]");
+        if (!nodeEl) return;
+        const nextKey = String(nodeEl.dataset.nodeKey || "");
+        if (!nextKey) return;
+        selectedNodeKey = nextKey;
+        renderTree();
+        renderDetails();
+      });
+
+      $("maintenance-node-editor")?.addEventListener("click", async (ev) => {
+        const actionNode = ev.target.closest("button[data-action]");
         if (!actionNode) return;
         const action = String(actionNode.dataset.action || "");
         const id = clampInt(actionNode.dataset.id, 0);
-        const parentId = clampInt(actionNode.dataset.parentId, 0);
-        const instrumentId = clampInt(actionNode.dataset.instrumentId, 0);
 
-        if (action === "add-child") {
-          await openAssetModal("create", null, parentId || null);
+        if (action === "open-instrument" && id) {
+          await instrumentsView.openInstrumentDetail(id);
           return;
         }
-        if (action === "edit" && id) {
+
+        if (action === "edit-asset-modal" && id) {
           const row = await api.get(`/maintenance/equipment/${id}`);
           await openAssetModal("edit", row, null);
           return;
         }
-        if (action === "delete" && id) {
-          if (!confirmDanger("Delete this maintenance asset?")) return;
-          await api.delete(`/maintenance/equipment/${id}`);
-          toast("Maintenance asset deleted");
-          await reloadTree();
+
+        if (action === "add-child-asset" && id) {
+          await openAssetModal("create", null, id);
           return;
         }
-        if (action === "open-instrument" && instrumentId) {
-          await instrumentsView.openInstrumentDetail(instrumentId);
+
+        if (action === "add-asset-under-container" && id) {
+          await openAssetModal("create", null, null, id);
         }
       });
 
@@ -4703,74 +4773,444 @@
       });
     }
 
-    function renderNode(node, instrumentsByEquipment, depth = 0) {
-      const id = clampInt(node?.id, 0);
-      const name = String(node?.name || "-");
-      const code = String(node?.equipment_code || "");
-      const assetType = String(node?.asset_type || "-");
-      const criticality = String(node?.criticality || "B");
-      const children = Array.isArray(node?.children) ? node.children : [];
-      const instruments = Array.isArray(instrumentsByEquipment.get(id)) ? instrumentsByEquipment.get(id) : [];
-
-      const wrapper = el("div", { style: `margin-left: ${depth * 16}px; padding: 6px 0;` }, [
-        el("div", { class: "row", style: "justify-content: space-between; gap: 8px;" }, [
-          el("div", { text: `${name} (${code || `#${id}`}) • ${assetType} • criticality ${criticality}` }, []),
-          el("div", { class: "actions" }, [
-            el("button", { class: "btn small", type: "button", dataset: { action: "add-child", parentId: String(id) }, text: "Add child" }, []),
-            el("button", { class: "btn small", type: "button", dataset: { action: "edit", id: String(id) }, text: "Edit" }, []),
-            el("button", { class: "btn small danger", type: "button", dataset: { action: "delete", id: String(id) }, text: "Delete" }, []),
-          ]),
-        ]),
-      ]);
-
-      for (const child of children) {
-        wrapper.appendChild(renderNode(child, instrumentsByEquipment, depth + 1));
-      }
-
-      for (const inst of instruments) {
-        const instId = clampInt(inst?.id, 0);
-        const instLabel = String(inst?.label || "-");
-        const instType = String(inst?.instrument_type || "-");
-        const instStatus = String(inst?.status || "-");
-        wrapper.appendChild(
-          el("div", { style: `margin-left: ${(depth + 1) * 16}px; padding: 4px 0;` }, [
-            el("div", {
-              class: "muted",
-              style: "cursor: pointer;",
-              dataset: { action: "open-instrument", instrumentId: String(instId) },
-              text: `Instrument: ${instLabel} • ${instType} • ${instStatus}`,
-            }, []),
-          ])
-        );
-      }
-      return wrapper;
+    function parseNodeKey(key) {
+      const [type, rawId] = String(key || "").split(":");
+      const id = clampInt(rawId, 0);
+      if (!type || !id) return null;
+      return { type, id };
     }
 
-    function renderTree(tree) {
-      const host = $("maintenance-assets-tree");
-      if (!host) return;
-      host.innerHTML = "";
-      const rows = Array.isArray(tree) ? tree : [];
+    function buildTreeData() {
+      const equipmentById = new Map();
+      const equipmentRootsByContainer = new Map();
       const instrumentsByEquipment = new Map();
+
       for (const inst of instrumentRows) {
         const equipmentId = clampInt(inst?.equipment_id, 0);
         if (!equipmentId) continue;
         if (!instrumentsByEquipment.has(equipmentId)) instrumentsByEquipment.set(equipmentId, []);
         instrumentsByEquipment.get(equipmentId).push(inst);
       }
-      for (const key of instrumentsByEquipment.keys()) {
-        const sorted = (instrumentsByEquipment.get(key) || []).slice().sort((a, b) => {
-          return String(a?.label || "").localeCompare(String(b?.label || ""));
+
+      for (const row of assetRows) {
+        const id = clampInt(row?.id, 0);
+        if (!id) continue;
+        equipmentById.set(id, {
+          type: "equipment",
+          id,
+          name: String(row?.name || `Asset #${id}`),
+          code: String(row?.equipment_code || ""),
+          row,
+          children: [],
         });
-        instrumentsByEquipment.set(key, sorted);
       }
 
-      if (!rows.length) {
-        host.appendChild(el("div", { class: "muted", text: "No maintenance assets found." }, []));
+      for (const eqNode of equipmentById.values()) {
+        const parentId = clampInt(eqNode?.row?.parent_id, 0);
+        if (parentId && equipmentById.has(parentId)) {
+          equipmentById.get(parentId).children.push(eqNode);
+        } else {
+          const containerId = clampInt(eqNode?.row?.container_id, 0);
+          if (!equipmentRootsByContainer.has(containerId)) equipmentRootsByContainer.set(containerId, []);
+          equipmentRootsByContainer.get(containerId).push(eqNode);
+        }
+      }
+
+      for (const eqNode of equipmentById.values()) {
+        const linkedInstruments = (instrumentsByEquipment.get(eqNode.id) || []).slice().sort((a, b) => {
+          return String(a?.label || "").localeCompare(String(b?.label || ""));
+        });
+        for (const inst of linkedInstruments) {
+          const instId = clampInt(inst?.id, 0);
+          if (!instId) continue;
+          eqNode.children.push({
+            type: "instrument",
+            id: instId,
+            name: String(inst?.label || `Instrument #${instId}`),
+            row: inst,
+            children: [],
+          });
+        }
+      }
+
+      const containerById = new Map();
+      const roots = [];
+      for (const row of containerRows) {
+        const id = clampInt(row?.id, 0);
+        if (!id) continue;
+        containerById.set(id, {
+          type: "container",
+          id,
+          name: String(row?.name || `Container #${id}`),
+          code: String(row?.container_code || ""),
+          row,
+          children: [],
+        });
+      }
+
+      for (const containerNode of containerById.values()) {
+        const parentId = clampInt(containerNode?.row?.parent_id, 0);
+        if (parentId && containerById.has(parentId)) {
+          containerById.get(parentId).children.push(containerNode);
+        } else {
+          roots.push(containerNode);
+        }
+      }
+
+      for (const containerNode of containerById.values()) {
+        const equipmentRoots = equipmentRootsByContainer.get(containerNode.id) || [];
+        containerNode.children.push(...equipmentRoots);
+      }
+
+      const unassigned = equipmentRootsByContainer.get(0) || [];
+      if (unassigned.length) {
+        roots.push({
+          type: "container",
+          id: -1,
+          name: "Unassigned",
+          code: "",
+          row: {
+            id: -1,
+            name: "Unassigned",
+            container_code: "",
+            description: "Assets without container",
+            location: null,
+            parent_id: null,
+            asset_category: null,
+            asset_type: null,
+            criticality: "B",
+            duty_cycle_hours_per_day: null,
+            spares_class: "standard",
+            safety_classification: [],
+            meta: {},
+            is_active: true,
+          },
+          children: unassigned,
+        });
+      }
+
+      const sortChildren = (node) => {
+        const ordered = (Array.isArray(node.children) ? node.children : []).slice().sort((a, b) => {
+          const at = String(a?.type || "");
+          const bt = String(b?.type || "");
+          if (at !== bt) return at.localeCompare(bt);
+          return String(a?.name || "").localeCompare(String(b?.name || ""));
+        });
+        node.children = ordered;
+        for (const child of node.children) sortChildren(child);
+      };
+
+      roots.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+      for (const root of roots) sortChildren(root);
+      return roots;
+    }
+
+    function renderTree() {
+      const host = $("maintenance-assets-tree");
+      if (!host) return;
+      host.innerHTML = "";
+      const roots = buildTreeData();
+      const term = String($("maintenance-assets-search")?.value || "").trim().toLowerCase();
+
+      if (!roots.length) {
+        host.appendChild(el("div", { class: "muted", text: "No maintenance containers/assets found." }, []));
         return;
       }
-      for (const node of rows) {
-        host.appendChild(renderNode(node, instrumentsByEquipment));
+
+      const buildNodeEl = (node) => {
+        const key = `${node.type}:${node.id}`;
+        const childrenRaw = Array.isArray(node.children) ? node.children : [];
+        const childrenBuilt = childrenRaw.map((child) => buildNodeEl(child)).filter(Boolean);
+
+        const title = String(node?.name || "");
+        const code = String(node?.code || "").trim();
+        const typeLabel = String(node?.type || "");
+
+        const selfText = `${title} ${code} ${typeLabel} ${String(node?.row?.asset_type || "")}`.toLowerCase();
+        const selfMatch = !term || selfText.includes(term);
+        const childMatch = childrenBuilt.some((x) => x.matched);
+        const matched = selfMatch || childMatch;
+        if (!matched) return null;
+
+        const hasChildren = childrenBuilt.length > 0;
+        const left = el("div", { class: "left" }, [
+          hasChildren
+            ? el("button", { class: "twisty", type: "button", dataset: { toggle: key }, text: collapsed.has(key) ? "▸" : "▾" })
+            : el("span", { class: "badge", text: " " }),
+          el("span", { class: "title", text: code ? `${title} (${code})` : title }),
+          el("span", { class: "badge", text: typeLabel }),
+        ]);
+
+        const badges = [];
+        if (node.type === "container") {
+          const childContainers = childrenRaw.filter((c) => c.type === "container").length;
+          const childAssets = childrenRaw.filter((c) => c.type === "equipment").length;
+          badges.push(el("span", { class: "badge", text: `C:${childContainers}` }));
+          badges.push(el("span", { class: "badge", text: `A:${childAssets}` }));
+        }
+        if (node.type === "equipment") {
+          const childAssets = childrenRaw.filter((c) => c.type === "equipment").length;
+          const childInst = childrenRaw.filter((c) => c.type === "instrument").length;
+          if (node?.row?.asset_type) badges.push(el("span", { class: "badge", text: `type:${node.row.asset_type}` }));
+          badges.push(el("span", { class: "badge", text: `A:${childAssets}` }));
+          badges.push(el("span", { class: "badge", text: `I:${childInst}` }));
+        }
+        if (node.type === "instrument") {
+          badges.push(el("span", { class: "badge", text: String(node?.row?.instrument_type || "-") }));
+          badges.push(el("span", { class: "badge", text: String(node?.row?.status || "-") }));
+        }
+
+        const row = el("div", { class: "node", dataset: { nodeKey: key } }, [left, el("div", { class: "meta" }, badges)]);
+        if (selectedNodeKey === key) row.classList.add("selected");
+
+        const block = el("div", {}, [row]);
+        if (hasChildren) {
+          const wrap = el("div", { class: "children" }, childrenBuilt.map((c) => c.el));
+          if (collapsed.has(key)) wrap.classList.add("hidden");
+          block.appendChild(wrap);
+        }
+        return { el: block, matched };
+      };
+
+      for (const root of roots) {
+        const built = buildNodeEl(root);
+        if (built) host.appendChild(built.el);
+      }
+    }
+
+    function getNodeByKey(key) {
+      const parsed = parseNodeKey(key);
+      if (!parsed) return null;
+      if (parsed.type === "container") {
+        const row = containerRows.find((x) => clampInt(x?.id, 0) === parsed.id) || null;
+        return row ? { type: "container", row, id: parsed.id } : null;
+      }
+      if (parsed.type === "equipment") {
+        const row = assetRows.find((x) => clampInt(x?.id, 0) === parsed.id) || null;
+        return row ? { type: "equipment", row, id: parsed.id } : null;
+      }
+      if (parsed.type === "instrument") {
+        const row = instrumentRows.find((x) => clampInt(x?.id, 0) === parsed.id) || null;
+        return row ? { type: "instrument", row, id: parsed.id } : null;
+      }
+      return null;
+    }
+
+    function renderDetails() {
+      const editor = $("maintenance-node-editor");
+      if (!editor) return;
+      const statusEl = $("maintenance-node-status");
+      setStatus(statusEl, "", "");
+
+      const saveBtn = $("btn-maint-node-save");
+      const deleteBtn = $("btn-maint-node-delete");
+
+      if (!selectedNodeKey) {
+        editor.classList.add("muted");
+        editor.innerHTML = "Select a node from the tree.";
+        if (saveBtn) saveBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
+        return;
+      }
+
+      const selected = getNodeByKey(selectedNodeKey);
+      if (!selected) {
+        selectedNodeKey = null;
+        editor.classList.add("muted");
+        editor.innerHTML = "Select a node from the tree.";
+        if (saveBtn) saveBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
+        return;
+      }
+
+      const writable = can(state.perms, "maintenance:write");
+      if (saveBtn) saveBtn.disabled = !writable || selected.type === "instrument";
+      if (deleteBtn) deleteBtn.disabled = !writable || selected.type === "instrument" || (selected.type === "container" && selected.id < 0);
+
+      editor.classList.remove("muted");
+      editor.innerHTML = "";
+
+      const header = el("div", { class: "row" }, [
+        el("div", {}, [
+          el("div", { class: "muted", text: `${selected.type.toUpperCase()} #${selected.id}` }),
+          el("div", { style: "font-weight:700", text: String(selected.row?.name || selected.row?.label || `#${selected.id}`) }),
+        ]),
+        el("div", { class: "actions" }, [
+          selected.type === "container" && selected.id > 0
+            ? el("button", { class: "btn small", type: "button", dataset: { action: "add-asset-under-container", id: String(selected.id) }, text: "Add Asset" })
+            : "",
+          selected.type === "equipment"
+            ? el("button", { class: "btn small", type: "button", dataset: { action: "add-child-asset", id: String(selected.id) }, text: "Add Child" })
+            : "",
+          selected.type === "equipment"
+            ? el("button", { class: "btn small", type: "button", dataset: { action: "edit-asset-modal", id: String(selected.id) }, text: "Advanced Edit" })
+            : "",
+          selected.type === "instrument"
+            ? el("button", { class: "btn small", type: "button", dataset: { action: "open-instrument", id: String(selected.id) }, text: "Open Instrument" })
+            : "",
+        ].filter(Boolean)),
+      ]);
+      editor.appendChild(header);
+
+      if (selected.type === "instrument") {
+        editor.appendChild(
+          el("div", { class: "form" }, [
+            el("label", {}, ["Label", el("input", { class: "input", disabled: true, value: String(selected.row?.label || "") })]),
+            el("label", {}, ["Type", el("input", { class: "input", disabled: true, value: String(selected.row?.instrument_type || "") })]),
+            el("label", {}, ["Status", el("input", { class: "input", disabled: true, value: String(selected.row?.status || "") })]),
+            el("label", {}, ["Equipment ID", el("input", { class: "input", disabled: true, value: String(selected.row?.equipment_id || "") })]),
+          ])
+        );
+        return;
+      }
+
+      const form = el("div", { class: "form", id: "maintenance-node-form", dataset: { type: selected.type, id: String(selected.id) } }, []);
+      form.appendChild(el("label", {}, ["Name", el("input", { class: "input", name: "name", value: String(selected.row?.name || "") })]));
+      form.appendChild(el("label", {}, ["Location", el("input", { class: "input", name: "location", value: String(selected.row?.location || "") })]));
+      form.appendChild(el("label", {}, ["Asset Category", el("input", { class: "input", name: "asset_category", value: String(selected.row?.asset_category || "") })]));
+      form.appendChild(el("label", {}, ["Asset Type", el("input", { class: "input", name: "asset_type", value: String(selected.row?.asset_type || "") })]));
+
+      const criticality = el("select", { class: "input", name: "criticality" }, [
+        el("option", { value: "A", text: "A" }),
+        el("option", { value: "B", text: "B" }),
+        el("option", { value: "C", text: "C" }),
+      ]);
+      criticality.value = String(selected.row?.criticality || "B");
+      form.appendChild(el("label", {}, ["Criticality", criticality]));
+
+      if (selected.type === "container") {
+        const parentSelect = el("select", { class: "input", name: "parent_id" }, [el("option", { value: "", text: "(No Parent)" })]);
+        for (const row of containerRows) {
+          const id = clampInt(row?.id, 0);
+          if (!id || id === selected.id) continue;
+          parentSelect.appendChild(el("option", { value: String(id), text: `${String(row?.name || `#${id}`)} (${String(row?.container_code || `#${id}`)})` }));
+        }
+        parentSelect.value = selected.row?.parent_id != null ? String(selected.row.parent_id) : "";
+        form.appendChild(el("label", {}, ["Parent Container", parentSelect]));
+      }
+
+      if (selected.type === "equipment") {
+        const parentSelect = el("select", { class: "input", name: "parent_id" }, [el("option", { value: "", text: "(No Parent)" })]);
+        for (const row of assetRows) {
+          const id = clampInt(row?.id, 0);
+          if (!id || id === selected.id) continue;
+          parentSelect.appendChild(el("option", { value: String(id), text: `${String(row?.name || `#${id}`)} (${String(row?.equipment_code || `#${id}`)})` }));
+        }
+        parentSelect.value = selected.row?.parent_id != null ? String(selected.row.parent_id) : "";
+
+        const containerSelect = el("select", { class: "input", name: "container_id" }, [el("option", { value: "", text: "(No Container)" })]);
+        for (const row of containerRows) {
+          const id = clampInt(row?.id, 0);
+          if (!id) continue;
+          containerSelect.appendChild(el("option", { value: String(id), text: `${String(row?.name || `#${id}`)} (${String(row?.container_code || `#${id}`)})` }));
+        }
+        containerSelect.value = selected.row?.container_id != null ? String(selected.row.container_id) : "";
+        form.appendChild(el("label", {}, ["Parent Asset", parentSelect]));
+        form.appendChild(el("label", {}, ["Container", containerSelect]));
+      }
+
+      const description = el("textarea", { class: "input", name: "description", rows: "3" }, []);
+      description.value = String(selected.row?.description || "");
+      form.appendChild(el("label", {}, ["Description", description]));
+
+      editor.appendChild(form);
+    }
+
+    async function saveSelectedNode() {
+      const selected = getNodeByKey(selectedNodeKey);
+      if (!selected || selected.type === "instrument") return;
+      const form = $("maintenance-node-form");
+      if (!form) return;
+
+      const name = String(form.querySelector("[name='name']")?.value || "").trim();
+      if (!name) {
+        setStatus("maintenance-node-status", "Name is required", "error");
+        return;
+      }
+
+      const location = String(form.querySelector("[name='location']")?.value || "").trim() || null;
+      const assetCategory = String(form.querySelector("[name='asset_category']")?.value || "").trim() || null;
+      const assetType = String(form.querySelector("[name='asset_type']")?.value || "").trim() || null;
+      const criticality = String(form.querySelector("[name='criticality']")?.value || "B").trim() || "B";
+      const description = String(form.querySelector("[name='description']")?.value || "").trim() || null;
+
+      setStatus("maintenance-node-status", "Saving...", "");
+      try {
+        if (selected.type === "container") {
+          const parentId = clampInt(form.querySelector("[name='parent_id']")?.value || 0, 0) || null;
+          const payload = {
+            name,
+            location,
+            description,
+            parent_id: parentId,
+            asset_category: assetCategory,
+            asset_type: assetType,
+            criticality,
+            duty_cycle_hours_per_day: selected.row?.duty_cycle_hours_per_day ?? null,
+            spares_class: String(selected.row?.spares_class || "standard"),
+            safety_classification: Array.isArray(selected.row?.safety_classification) ? selected.row.safety_classification : [],
+            meta: selected.row?.meta && typeof selected.row.meta === "object" ? selected.row.meta : {},
+          };
+          await api.put(`/maintenance/containers/${selected.id}`, { json: payload });
+        }
+
+        if (selected.type === "equipment") {
+          const parentId = clampInt(form.querySelector("[name='parent_id']")?.value || 0, 0) || null;
+          const containerId = clampInt(form.querySelector("[name='container_id']")?.value || 0, 0) || null;
+          const payload = {
+            name,
+            location,
+            description,
+            vendor_id: selected.row?.vendor_id ?? null,
+            container_id: containerId,
+            parent_id: parentId,
+            asset_category: assetCategory,
+            asset_type: assetType,
+            criticality,
+            duty_cycle_hours_per_day: selected.row?.duty_cycle_hours_per_day ?? null,
+            spares_class: String(selected.row?.spares_class || "standard"),
+            safety_classification: Array.isArray(selected.row?.safety_classification) ? selected.row.safety_classification : [],
+            meta: selected.row?.meta && typeof selected.row.meta === "object" ? selected.row.meta : {},
+          };
+          await api.put(`/maintenance/equipment/${selected.id}`, { json: payload });
+        }
+
+        toast("Saved");
+        await reloadTree();
+        setStatus("maintenance-node-status", "Saved", "ok");
+      } catch (err) {
+        setStatus("maintenance-node-status", err?.message || "Failed to save", "error");
+      }
+    }
+
+    async function deleteSelectedNode() {
+      const selected = getNodeByKey(selectedNodeKey);
+      if (!selected || selected.type === "instrument") return;
+      if (selected.type === "container" && selected.id < 0) return;
+
+      const label = String(selected.row?.name || `#${selected.id}`);
+      if (!confirmDanger(`Delete ${selected.type} '${label}'?`)) return;
+
+      try {
+        if (selected.type === "container") {
+          await api.delete(`/maintenance/containers/${selected.id}`);
+        } else if (selected.type === "equipment") {
+          await api.delete(`/maintenance/equipment/${selected.id}`);
+        }
+        selectedNodeKey = null;
+        toast("Deleted");
+        await reloadTree();
+      } catch (err) {
+        setStatus("maintenance-node-status", err?.message || "Failed to delete", "error");
+      }
+    }
+
+    async function loadContainers() {
+      try {
+        const rows = await api.get("/maintenance/containers");
+        containerRows = Array.isArray(rows) ? rows : [];
+      } catch {
+        containerRows = [];
       }
     }
 
@@ -4791,10 +5231,11 @@
     async function reloadTree() {
       setStatus("maintenance-assets-status", "Loading...", "");
       try {
-        await Promise.all([loadFlatAssets(), loadInstruments()]);
-        const tree = await api.get("/maintenance/equipment/tree");
-        renderTree(tree);
-        setStatus("maintenance-assets-status", `Loaded ${assetRows.length} asset(s), ${instrumentRows.length} instrument(s)`, "ok");
+        await Promise.all([loadContainers(), loadFlatAssets(), loadInstruments()]);
+        if (selectedNodeKey && !getNodeByKey(selectedNodeKey)) selectedNodeKey = null;
+        renderTree();
+        renderDetails();
+        setStatus("maintenance-assets-status", `Loaded ${containerRows.length} container(s), ${assetRows.length} asset(s), ${instrumentRows.length} instrument(s)`, "ok");
       } catch (err) {
         setStatus("maintenance-assets-status", err?.message || "Failed to load maintenance assets", "error");
       }
@@ -4817,7 +5258,22 @@
       sel.value = Array.from(sel.options).some((o) => o.value === current) ? current : "";
     }
 
-    async function openAssetModal(mode, row = null, forcedParentId = null) {
+    async function populateContainerOptions(selectedContainerId = null) {
+      const sel = $("maintenance-asset-container");
+      if (!sel) return;
+      const current = selectedContainerId == null ? "" : String(selectedContainerId);
+      sel.innerHTML = "";
+      sel.appendChild(el("option", { value: "", text: "(No Container)" }, []));
+      for (const row of containerRows) {
+        const id = clampInt(row?.id, 0);
+        if (!id) continue;
+        const label = `${String(row?.name || `#${id}`)} (${String(row?.container_code || `#${id}`)})`;
+        sel.appendChild(el("option", { value: String(id), text: label }, []));
+      }
+      sel.value = Array.from(sel.options).some((o) => o.value === current) ? current : "";
+    }
+
+    async function openAssetModal(mode, row = null, forcedParentId = null, forcedContainerId = null) {
       const form = $("form-maintenance-asset");
       const title = $("maintenance-asset-modal-title");
       if (!form) return;
@@ -4830,6 +5286,7 @@
       const currentAssetId = clampInt(row?.id, 0) || null;
       const selectedParentId = forcedParentId ?? row?.parent_id ?? null;
       await populateParentOptions(selectedParentId, currentAssetId);
+      await populateContainerOptions(forcedContainerId ?? row?.container_id ?? null);
 
       form.asset_id.value = currentAssetId ? String(currentAssetId) : "";
       form.name.value = String(row?.name || "");
@@ -4863,6 +5320,7 @@
         location: String(form.location?.value || "").trim() || null,
         description: String(form.description?.value || "").trim() || null,
         vendor_id: form.vendor_id?.value ? clampInt(form.vendor_id.value, 0) : null,
+        container_id: form.container_id?.value ? clampInt(form.container_id.value, 0) : null,
         parent_id: form.parent_id?.value ? clampInt(form.parent_id.value, 0) : null,
         asset_category: String(form.asset_category?.value || "").trim() || null,
         asset_type: String(form.asset_type?.value || "").trim() || null,

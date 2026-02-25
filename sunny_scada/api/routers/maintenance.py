@@ -13,6 +13,7 @@ from sunny_scada.db.models import (
     Equipment,
     Instrument,
     InventoryTransaction,
+    MaintenanceContainer,
     SparePart,
     Schedule,
     TaskTemplate,
@@ -20,9 +21,11 @@ from sunny_scada.db.models import (
     WorkOrder,
 )
 from sunny_scada.services.maintenance_equipment_service import MaintenanceEquipmentService
+from sunny_scada.services.maintenance_container_service import MaintenanceContainerService
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 _equipment_service = MaintenanceEquipmentService()
+_container_service = MaintenanceContainerService()
 
 
 def _now() -> dt.datetime:
@@ -178,6 +181,7 @@ class EquipmentIn(BaseModel):
     location: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
     vendor_id: Optional[int] = None
+    container_id: Optional[int] = None
     parent_id: Optional[int] = None
     asset_category: Optional[str] = Field(default=None, max_length=50)
     asset_type: Optional[str] = Field(default=None, max_length=100)
@@ -186,6 +190,176 @@ class EquipmentIn(BaseModel):
     spares_class: str = Field(default="standard", max_length=30)
     safety_classification: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class MaintenanceContainerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    location: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = None
+    parent_id: Optional[int] = None
+    asset_category: Optional[str] = Field(default=None, max_length=50)
+    asset_type: Optional[str] = Field(default=None, max_length=100)
+    criticality: str = Field(default="B", max_length=10)
+    duty_cycle_hours_per_day: Optional[float] = None
+    spares_class: str = Field(default="standard", max_length=30)
+    safety_classification: list[str] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/containers")
+def create_maintenance_container(
+    req: MaintenanceContainerIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    payload = req.model_dump()
+    try:
+        payload = _container_service.validate_payload(db, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    row = MaintenanceContainer(
+        container_code="",
+        name=req.name,
+        location=req.location,
+        description=req.description,
+        parent_id=payload.get("parent_id"),
+        asset_category=payload.get("asset_category"),
+        asset_type=payload.get("asset_type"),
+        criticality=payload.get("criticality") or "B",
+        duty_cycle_hours_per_day=payload.get("duty_cycle_hours_per_day"),
+        spares_class=payload.get("spares_class") or "standard",
+        safety_classification=payload.get("safety_classification") or [],
+        is_active=True,
+        meta=req.meta,
+    )
+    db.add(row)
+    db.flush()
+    row.container_code = f"MC-{row.id:06d}"
+    db.add(row)
+    db.commit()
+    try:
+        audit.log(
+            db,
+            action="maintenance.container.create",
+            user_id=user.id,
+            client_ip=request.client.host if request.client else None,
+            resource=row.container_code,
+            metadata={"id": row.id},
+        )
+    except Exception:
+        pass
+    return _container_service.container_out(row)
+
+
+@router.get("/containers")
+def list_maintenance_containers(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    rows = db.query(MaintenanceContainer).order_by(MaintenanceContainer.id.asc()).all()
+    return [_container_service.container_out(row) for row in rows]
+
+
+@router.get("/containers/tree")
+def maintenance_container_tree(
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    return _container_service.build_tree(db)
+
+
+@router.get("/containers/{container_id}")
+def get_maintenance_container(
+    container_id: int,
+    db: Session = Depends(get_db),
+    _perm=Depends(require_permission("maintenance:read")),
+):
+    row = db.query(MaintenanceContainer).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _container_service.container_out(row)
+
+
+@router.put("/containers/{container_id}")
+def update_maintenance_container(
+    container_id: int,
+    req: MaintenanceContainerIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    row = db.query(MaintenanceContainer).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    payload = req.model_dump()
+    try:
+        payload = _container_service.validate_payload(db, payload=payload, equipment_id=int(container_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    row.name = req.name
+    row.location = req.location
+    row.description = req.description
+    row.parent_id = payload.get("parent_id")
+    row.asset_category = payload.get("asset_category")
+    row.asset_type = payload.get("asset_type")
+    row.criticality = payload.get("criticality") or "B"
+    row.duty_cycle_hours_per_day = payload.get("duty_cycle_hours_per_day")
+    row.spares_class = payload.get("spares_class") or "standard"
+    row.safety_classification = payload.get("safety_classification") or []
+    row.meta = req.meta
+    db.add(row)
+    db.commit()
+    try:
+        audit.log(
+            db,
+            action="maintenance.container.update",
+            user_id=user.id,
+            client_ip=request.client.host if request.client else None,
+            resource=row.container_code,
+            metadata={"id": row.id},
+        )
+    except Exception:
+        pass
+    return {"status": "ok", "container": _container_service.container_out(row)}
+
+
+@router.delete("/containers/{container_id}")
+def delete_maintenance_container(
+    container_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    audit=Depends(get_audit_service),
+    _perm=Depends(require_permission("maintenance:write")),
+):
+    row = db.query(MaintenanceContainer).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    if db.query(Equipment.id).filter(Equipment.container_id == int(container_id)).first() is not None:
+        raise HTTPException(status_code=400, detail="container has linked equipment")
+    code = row.container_code
+    db.delete(row)
+    db.commit()
+    try:
+        audit.log(
+            db,
+            action="maintenance.container.delete",
+            user_id=user.id,
+            client_ip=request.client.host if request.client else None,
+            resource=code,
+            metadata={"id": int(container_id)},
+        )
+    except Exception:
+        pass
+    return {"status": "ok"}
 
 
 @router.post("/equipment")
@@ -209,6 +383,7 @@ def create_equipment(
         location=req.location,
         description=req.description,
         vendor_id=req.vendor_id,
+        container_id=payload.get("container_id"),
         parent_id=payload.get("parent_id"),
         asset_category=payload.get("asset_category"),
         asset_type=payload.get("asset_type"),
@@ -284,6 +459,7 @@ def update_equipment(
     e.location = req.location
     e.description = req.description
     e.vendor_id = req.vendor_id
+    e.container_id = payload.get("container_id")
     e.parent_id = payload.get("parent_id")
     e.asset_category = payload.get("asset_category")
     e.asset_type = payload.get("asset_type")

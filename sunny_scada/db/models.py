@@ -422,6 +422,29 @@ class Vendor(Base):
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class MaintenanceContainer(Base):
+    __tablename__ = "maintenance_containers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    container_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("maintenance_containers.id", ondelete="SET NULL"), nullable=True, index=True)
+    asset_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    asset_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    criticality: Mapped[str] = mapped_column(String(10), default="B", index=True)
+    duty_cycle_hours_per_day: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spares_class: Mapped[str] = mapped_column(String(30), default="standard", index=True)
+    safety_classification: Mapped[List[str]] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    parent: Mapped[Optional["MaintenanceContainer"]] = relationship(
+        "MaintenanceContainer", remote_side=[id], lazy="selectin"
+    )
+
+
 class Equipment(Base):
     __tablename__ = "equipment"
 
@@ -431,6 +454,9 @@ class Equipment(Base):
     location: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vendor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+    container_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("maintenance_containers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"), nullable=True, index=True)
     asset_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     asset_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
@@ -442,6 +468,7 @@ class Equipment(Base):
     meta: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
 
     vendor: Mapped[Optional[Vendor]] = relationship("Vendor", lazy="selectin")
+    container: Mapped[Optional[MaintenanceContainer]] = relationship("MaintenanceContainer", lazy="selectin")
     parent: Mapped[Optional["Equipment"]] = relationship("Equipment", remote_side=[id], lazy="selectin")
 
 

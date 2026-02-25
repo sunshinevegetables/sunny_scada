@@ -211,6 +211,7 @@
                     <th>Equipment</th>
                     <th style="width: 140px">Type</th>
                     <th style="width: 200px">PV Datapoint</th>
+                    <th style="width: 120px">PV Mapping</th>
                     <th style="width: 120px">Health Score</th>
                     <th style="width: 150px">Calibration Due</th>
                     <th style="width: 130px">Spares Status</th>
@@ -265,13 +266,32 @@
               <h2>Maintenance Assets</h2>
               <div class="actions">
                 <button id="btn-maint-assets-refresh" class="btn">Refresh</button>
-                <button id="btn-maint-assets-add-root" class="btn primary">Add Root Asset</button>
+                <button id="btn-maint-assets-add-root" class="btn primary">Add Asset</button>
               </div>
             </div>
 
             <div id="maintenance-assets-status" class="status"></div>
-            <div class="panel">
-              <div id="maintenance-assets-tree" class="tree"></div>
+
+            <div class="split">
+              <div class="panel">
+                <div class="row">
+                  <h3>Tree</h3>
+                  <input id="maintenance-assets-search" class="input" placeholder="Filter tree…" />
+                </div>
+                <div id="maintenance-assets-tree" class="tree"></div>
+              </div>
+
+              <div class="panel">
+                <div class="row">
+                  <h3>Details</h3>
+                  <div class="actions">
+                    <button id="btn-maint-node-save" class="btn">Save</button>
+                    <button id="btn-maint-node-delete" class="btn danger">Delete</button>
+                  </div>
+                </div>
+                <div id="maintenance-node-status" class="status"></div>
+                <div id="maintenance-node-editor" class="muted">Select a node from the tree.</div>
+              </div>
             </div>
 
             <dialog id="modal-maintenance-asset" class="modal">
@@ -288,6 +308,12 @@
                     Parent
                     <select name="parent_id" id="maintenance-asset-parent" class="input">
                       <option value="">(No Parent)</option>
+                    </select>
+                  </label>
+                  <label>
+                    Container
+                    <select name="container_id" id="maintenance-asset-container" class="input">
+                      <option value="">(No Container)</option>
                     </select>
                   </label>
                   <label>

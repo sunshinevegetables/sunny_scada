@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from sunny_scada.db.models import (
     CfgDataPoint,
+    CfgContainer,
     CfgEquipment,
     Equipment,
     Instrument,
@@ -16,6 +17,7 @@ from sunny_scada.db.models import (
     InstrumentCalibration,
     InstrumentDataPoint,
     InstrumentSpareMap,
+    MaintenanceContainer,
     SparePart,
     Vendor,
 )
@@ -42,6 +44,39 @@ def _default_attachment_storage_path(instrument_id: int, filename: str) -> str:
 
 
 class InstrumentService:
+    def _ensure_container_from_config(self, db: Session, container_id: int) -> None:
+        cfg_container = db.query(CfgContainer).filter(CfgContainer.id == int(container_id)).one_or_none()
+        if cfg_container is None:
+            raise ValueError("container not found in config tree")
+
+        container_code = f"MC-{int(container_id):06d}"
+        existing = db.query(MaintenanceContainer.id).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
+        if existing is not None:
+            return
+
+        row = MaintenanceContainer(
+            id=int(container_id),
+            container_code=container_code,
+            name=cfg_container.name or f"Container {container_id}",
+            location=None,
+            description=f"Auto-created from config tree (ID: {container_id})",
+            parent_id=None,
+            asset_category=None,
+            asset_type=None,
+            criticality="B",
+            duty_cycle_hours_per_day=None,
+            spares_class="standard",
+            safety_classification=[],
+            is_active=True,
+            meta={},
+        )
+        db.add(row)
+        try:
+            db.flush()
+        except Exception as e:
+            db.rollback()
+            raise ValueError(f"failed to create container: {str(e)}")
+
     def _equipment_summary(self, equipment: Optional[Equipment]) -> Optional[dict[str, Any]]:
         if not equipment:
             return None
@@ -234,6 +269,10 @@ class InstrumentService:
         if cfg_equipment is None:
             raise ValueError("equipment not found in config tree")
         
+        # Ensure parent maintenance container exists
+        if getattr(cfg_equipment, "container_id", None) is not None:
+            self._ensure_container_from_config(db, int(cfg_equipment.container_id))
+
         # Create Equipment record from config
         equipment_code = f"EQ-{equipment_id:04d}"
         existing_by_code = db.query(Equipment).filter(Equipment.equipment_code == equipment_code).one_or_none()
@@ -248,6 +287,7 @@ class InstrumentService:
             location=None,
             description=f"Auto-created from config tree (ID: {equipment_id})",
             vendor_id=None,
+            container_id=(int(cfg_equipment.container_id) if getattr(cfg_equipment, "container_id", None) is not None else None),
             parent_id=None,
             asset_category=None,
             asset_type=None,

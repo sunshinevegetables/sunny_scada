@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from sunny_scada.db.models import Equipment
+from sunny_scada.db.models import Equipment, MaintenanceContainer
 
 
 ALLOWED_ASSET_CATEGORIES = {"refrigeration", "processing", "utility", "cip"}
@@ -123,16 +123,35 @@ class MaintenanceEquipmentService:
             if parent_row is None:
                 raise ValueError("parent_id not found")
 
+        container_id_raw = cleaned.get("container_id")
+        container_id: Optional[int]
+        if container_id_raw in (None, "", 0, "0"):
+            container_id = None
+        else:
+            container_id = int(container_id_raw)
+            container_row = db.query(MaintenanceContainer.id).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
+            if container_row is None:
+                raise ValueError("container_id not found")
+
         if category and asset_type:
             allowed_parents = HIERARCHY_RULES.get(category, {}).get(asset_type)
             if allowed_parents is not None:
-                if parent_row is None:
+                effective_parent_type: Optional[str] = None
+                if parent_row is not None:
+                    effective_parent_type = _norm_asset(parent_row.asset_type)
+                elif container_id is not None:
+                    container_row = (
+                        db.query(MaintenanceContainer.asset_type)
+                        .filter(MaintenanceContainer.id == int(container_id))
+                        .one_or_none()
+                    )
+                    effective_parent_type = _norm_asset(container_row[0]) if container_row else None
+
+                if effective_parent_type not in allowed_parents:
                     allowed_text = ", ".join(sorted(allowed_parents))
-                    raise ValueError(f"asset_type '{asset_type}' in category '{category}' requires parent asset_type in {{{allowed_text}}}")
-                parent_type = _norm_asset(parent_row.asset_type)
-                if parent_type not in allowed_parents:
-                    allowed_text = ", ".join(sorted(allowed_parents))
-                    raise ValueError(f"invalid hierarchy: asset_type '{asset_type}' must have parent asset_type in {{{allowed_text}}}")
+                    raise ValueError(
+                        f"asset_type '{asset_type}' in category '{category}' requires parent asset_type in {{{allowed_text}}}"
+                    )
 
         cleaned["asset_category"] = category
         cleaned["asset_type"] = asset_type
@@ -141,6 +160,7 @@ class MaintenanceEquipmentService:
         cleaned["duty_cycle_hours_per_day"] = duty_cycle
         cleaned["safety_classification"] = safety
         cleaned["parent_id"] = parent_id
+        cleaned["container_id"] = container_id
         return cleaned
 
     def equipment_out(self, row: Equipment) -> dict[str, Any]:
@@ -151,6 +171,7 @@ class MaintenanceEquipmentService:
             "location": row.location,
             "description": row.description,
             "vendor_id": row.vendor_id,
+            "container_id": row.container_id,
             "is_active": bool(row.is_active),
             "parent_id": row.parent_id,
             "asset_category": row.asset_category,
