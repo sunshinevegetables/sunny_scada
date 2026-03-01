@@ -149,3 +149,128 @@ def test_container_parent_assumptions_equipment_and_instruments(client: TestClie
         f"/maintenance/containers/{container_id}", headers=_auth(admin_token)
     )
     assert delete_container_resp.status_code == 200, delete_container_resp.text
+
+
+def test_move_equipment_between_containers_cascades_to_descendants(client: TestClient, admin_token: str):
+    src_container_resp = client.post(
+        "/maintenance/containers",
+        headers=_auth(admin_token),
+        json={
+            "name": "Line Source",
+            "location": "Plant X",
+            "description": "Source line",
+            "parent_id": None,
+            "asset_category": "processing",
+            "asset_type": "line",
+            "criticality": "B",
+            "duty_cycle_hours_per_day": 20,
+            "spares_class": "standard",
+            "safety_classification": [],
+            "meta": {},
+        },
+    )
+    assert src_container_resp.status_code == 200, src_container_resp.text
+    src_container_id = int(src_container_resp.json()["id"])
+
+    dst_container_resp = client.post(
+        "/maintenance/containers",
+        headers=_auth(admin_token),
+        json={
+            "name": "Line Destination",
+            "location": "Plant X",
+            "description": "Destination line",
+            "parent_id": None,
+            "asset_category": "processing",
+            "asset_type": "line",
+            "criticality": "B",
+            "duty_cycle_hours_per_day": 20,
+            "spares_class": "standard",
+            "safety_classification": [],
+            "meta": {},
+        },
+    )
+    assert dst_container_resp.status_code == 200, dst_container_resp.text
+    dst_container_id = int(dst_container_resp.json()["id"])
+
+    parent_equipment_resp = client.post(
+        "/maintenance/equipment",
+        headers=_auth(admin_token),
+        json={
+            "name": "Machine M1",
+            "location": "Line Source",
+            "description": "Parent machine",
+            "vendor_id": None,
+            "container_id": src_container_id,
+            "parent_id": None,
+            "asset_category": "processing",
+            "asset_type": "machine",
+            "criticality": "B",
+            "duty_cycle_hours_per_day": 14,
+            "spares_class": "standard",
+            "safety_classification": ["rotating"],
+            "meta": {},
+        },
+    )
+    assert parent_equipment_resp.status_code == 200, parent_equipment_resp.text
+    parent_equipment = parent_equipment_resp.json()
+    parent_equipment_id = int(parent_equipment["id"])
+
+    child_equipment_resp = client.post(
+        "/maintenance/equipment",
+        headers=_auth(admin_token),
+        json={
+            "name": "Conveyor C1",
+            "location": "Line Source",
+            "description": "Child conveyor",
+            "vendor_id": None,
+            "container_id": src_container_id,
+            "parent_id": parent_equipment_id,
+            "asset_category": "processing",
+            "asset_type": "conveyor",
+            "criticality": "B",
+            "duty_cycle_hours_per_day": 16,
+            "spares_class": "standard",
+            "safety_classification": ["rotating"],
+            "meta": {},
+        },
+    )
+    assert child_equipment_resp.status_code == 200, child_equipment_resp.text
+    child_equipment_id = int(child_equipment_resp.json()["id"])
+
+    move_resp = client.put(
+        f"/maintenance/equipment/{parent_equipment_id}",
+        headers=_auth(admin_token),
+        json={
+            "name": parent_equipment["name"],
+            "location": parent_equipment["location"],
+            "description": parent_equipment["description"],
+            "vendor_id": parent_equipment["vendor_id"],
+            "container_id": dst_container_id,
+            "parent_id": parent_equipment["parent_id"],
+            "asset_category": parent_equipment["asset_category"],
+            "asset_type": parent_equipment["asset_type"],
+            "criticality": parent_equipment["criticality"],
+            "duty_cycle_hours_per_day": parent_equipment["duty_cycle_hours_per_day"],
+            "spares_class": parent_equipment["spares_class"],
+            "safety_classification": parent_equipment["safety_classification"],
+            "meta": parent_equipment["meta"],
+        },
+    )
+    assert move_resp.status_code == 200, move_resp.text
+    moved_parent = move_resp.json().get("equipment") or {}
+    assert int(moved_parent["container_id"]) == dst_container_id
+
+    child_fetch_resp = client.get(
+        f"/maintenance/equipment/{child_equipment_id}",
+        headers=_auth(admin_token),
+    )
+    assert child_fetch_resp.status_code == 200, child_fetch_resp.text
+    moved_child = child_fetch_resp.json()
+    assert int(moved_child["container_id"]) == dst_container_id
+    assert int(moved_child["parent_id"]) == parent_equipment_id
+
+    delete_source_container = client.delete(
+        f"/maintenance/containers/{src_container_id}",
+        headers=_auth(admin_token),
+    )
+    assert delete_source_container.status_code == 200, delete_source_container.text

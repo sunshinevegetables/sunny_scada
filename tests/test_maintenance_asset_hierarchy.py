@@ -109,4 +109,50 @@ def test_maintenance_asset_governance_validation(client: TestClient, admin_token
         },
     )
     assert invalid.status_code == 400
-    assert "invalid hierarchy" in str(invalid.json().get("detail", "")).lower()
+    detail = str(invalid.json().get("detail", "")).lower()
+    assert "invalid hierarchy" in detail or "requires parent asset_type" in detail
+
+
+def test_maintenance_equipment_rejects_cycle_on_update(client: TestClient, admin_token: str):
+    root = _create_equipment(
+        client,
+        admin_token,
+        {
+            "name": "Root",
+            "asset_category": "processing",
+            "asset_type": "line",
+            "criticality": "A",
+        },
+    )
+    child = _create_equipment(
+        client,
+        admin_token,
+        {
+            "name": "Child Machine",
+            "parent_id": int(root["id"]),
+            "asset_category": "processing",
+            "asset_type": "machine",
+        },
+    )
+
+    cycle_resp = client.put(
+        f"/maintenance/equipment/{int(root['id'])}",
+        headers=_auth(admin_token),
+        json={
+            "name": root["name"],
+            "location": root["location"],
+            "description": root["description"],
+            "vendor_id": root["vendor_id"],
+            "container_id": root["container_id"],
+            "parent_id": int(child["id"]),
+            "asset_category": root["asset_category"],
+            "asset_type": root["asset_type"],
+            "criticality": root["criticality"],
+            "duty_cycle_hours_per_day": root["duty_cycle_hours_per_day"],
+            "spares_class": root["spares_class"],
+            "safety_classification": root["safety_classification"],
+            "meta": root["meta"],
+        },
+    )
+    assert cycle_resp.status_code == 400
+    assert "descendant" in str(cycle_resp.json().get("detail", "")).lower()

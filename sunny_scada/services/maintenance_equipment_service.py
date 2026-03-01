@@ -55,6 +55,21 @@ class MaintenanceEquipmentService:
     def _load_all(self, db: Session) -> list[Equipment]:
         return db.query(Equipment).order_by(Equipment.id.asc()).all()
 
+    def _parent_map(self, rows: list[Equipment]) -> dict[int, Optional[int]]:
+        return {
+            int(row.id): (int(row.parent_id) if row.parent_id is not None else None)
+            for row in rows
+        }
+
+    def _children_map(self, rows: list[Equipment]) -> dict[int, list[int]]:
+        children: dict[int, list[int]] = {}
+        for row in rows:
+            if row.parent_id is None:
+                continue
+            parent_id = int(row.parent_id)
+            children.setdefault(parent_id, []).append(int(row.id))
+        return children
+
     def validate_payload(
         self,
         db: Session,
@@ -123,6 +138,17 @@ class MaintenanceEquipmentService:
             if parent_row is None:
                 raise ValueError("parent_id not found")
 
+        if equipment_id is not None and parent_id is not None:
+            all_rows = self._load_all(db)
+            parent_by_id = self._parent_map(all_rows)
+            visited: set[int] = set()
+            current_id: Optional[int] = int(parent_id)
+            while current_id is not None and current_id not in visited:
+                if current_id == int(equipment_id):
+                    raise ValueError("parent_id cannot be a descendant of equipment")
+                visited.add(current_id)
+                current_id = parent_by_id.get(current_id)
+
         container_id_raw = cleaned.get("container_id")
         container_id: Optional[int]
         if container_id_raw in (None, "", 0, "0"):
@@ -132,6 +158,13 @@ class MaintenanceEquipmentService:
             container_row = db.query(MaintenanceContainer.id).filter(MaintenanceContainer.id == int(container_id)).one_or_none()
             if container_row is None:
                 raise ValueError("container_id not found")
+
+        if parent_row is not None:
+            parent_container_id = int(parent_row.container_id) if parent_row.container_id is not None else None
+            if container_id is None:
+                container_id = parent_container_id
+            elif parent_container_id != container_id:
+                raise ValueError("parent_id must belong to the same container_id")
 
         if category and asset_type:
             allowed_parents = HIERARCHY_RULES.get(category, {}).get(asset_type)
@@ -162,6 +195,39 @@ class MaintenanceEquipmentService:
         cleaned["parent_id"] = parent_id
         cleaned["container_id"] = container_id
         return cleaned
+
+    def assign_subtree_container(
+        self,
+        db: Session,
+        *,
+        root_equipment_id: int,
+        container_id: Optional[int],
+    ) -> list[int]:
+        rows = self._load_all(db)
+        row_ids = {int(row.id) for row in rows}
+        if int(root_equipment_id) not in row_ids:
+            raise ValueError("equipment not found")
+
+        children_map = self._children_map(rows)
+        stack = [int(root_equipment_id)]
+        subtree_ids: list[int] = []
+        visited: set[int] = set()
+
+        while stack:
+            node_id = stack.pop()
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            subtree_ids.append(node_id)
+            stack.extend(children_map.get(node_id, []))
+
+        if subtree_ids:
+            (
+                db.query(Equipment)
+                .filter(Equipment.id.in_(subtree_ids))
+                .update({Equipment.container_id: container_id}, synchronize_session=False)
+            )
+        return sorted(subtree_ids)
 
     def equipment_out(self, row: Equipment) -> dict[str, Any]:
         return {
@@ -238,12 +304,7 @@ class MaintenanceEquipmentService:
         if int(equipment_id) not in row_map:
             raise ValueError("equipment not found")
 
-        children_map: dict[int, list[int]] = {}
-        for row in rows:
-            if row.parent_id is None:
-                continue
-            parent = int(row.parent_id)
-            children_map.setdefault(parent, []).append(int(row.id))
+        children_map = self._children_map(rows)
 
         result: list[int] = []
         stack = list(children_map.get(int(equipment_id), []))

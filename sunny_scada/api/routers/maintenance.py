@@ -449,11 +449,35 @@ def update_equipment(
     e = db.query(Equipment).filter(Equipment.id == equipment_id).one_or_none()
     if not e:
         raise HTTPException(status_code=404, detail="Not found")
+
+    def _norm_optional_id(value: Any) -> Optional[int]:
+        if value in (None, "", 0, "0"):
+            return None
+        return int(value)
+
     payload = req.model_dump()
+
+    requested_container_id = _norm_optional_id(payload.get("container_id"))
+    current_container_id = _norm_optional_id(e.container_id)
+    if requested_container_id != current_container_id:
+        requested_parent_id = _norm_optional_id(payload.get("parent_id"))
+        if requested_parent_id is not None:
+            parent_row = (
+                db.query(Equipment.id, Equipment.container_id)
+                .filter(Equipment.id == int(requested_parent_id))
+                .one_or_none()
+            )
+            if parent_row is not None:
+                parent_container_id = _norm_optional_id(parent_row.container_id)
+                if parent_container_id != requested_container_id:
+                    payload["parent_id"] = None
+
     try:
         payload = _equipment_service.validate_payload(db, payload=payload, equipment_id=int(equipment_id))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    container_changed = _norm_optional_id(e.container_id) != _norm_optional_id(payload.get("container_id"))
 
     e.name = req.name
     e.location = req.location
@@ -468,6 +492,13 @@ def update_equipment(
     e.spares_class = payload.get("spares_class") or "standard"
     e.safety_classification = payload.get("safety_classification") or []
     e.meta = req.meta
+    if container_changed:
+        _equipment_service.assign_subtree_container(
+            db,
+            root_equipment_id=int(e.id),
+            container_id=payload.get("container_id"),
+        )
+
     db.add(e)
     db.commit()
     try:
